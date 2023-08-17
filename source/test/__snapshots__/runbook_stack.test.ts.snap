@@ -577,6 +577,387 @@ def handler(event, context):
       },
       "Type": "AWS::SSM::Document",
     },
+    "ASRConfigureS3ServerAccessLogging": {
+      "DependsOn": [
+        "CreateWait8",
+      ],
+      "Properties": {
+        "Content": {
+          "assumeRole": "{{ AutomationAssumeRole }}",
+          "description": "### Document Name - ASR-ConfigureS3ServerAccessLogging
+
+## What does this document do?
+This document is used to create or modify an Amazon S3 bucket for the s3 access logs in this account and region.  If the bucket already exists,
+then no error is thrown and the bucket will be used as a destination of this finding resource bucket access logs.
+
+## Input Parameters
+* BucketName: (Required) Name of the S3 bucket (not the ARN).
+* DestBucketName: (Required) Name of the S3 bucket to write the logs to (not the ARN)
+* AutomationAssumeRole: (Required) The ARN of the role that allows Automation to perform the actions on your behalf.
+
+## Output Parameters
+* GetBucketPublicAccessBlock.Output - JSON formatted response from the GetPublicAccessBlock APAfI call
+",
+          "mainSteps": [
+            {
+              "action": "aws:executeScript",
+              "description": "## CreateDestinationBucket
+Creates the S3 Log destination bucket if needed.
+## Outputs
+* Output: None
+",
+              "inputs": {
+                "Handler": "lambda_handler",
+                "InputPayload": {
+                  "Finding": "{{Finding}}",
+                  "Resource": "{{ Resource }}",
+                },
+                "Runtime": "python3.8",
+                "Script": "import logging
+import copy
+import json
+import time
+from pprint import pprint
+import botocore
+import boto3
+from botocore.exceptions import ClientError
+from botocore.config import Config
+
+def get_bucket_lifecycle_of_s3(s3_client, bucket_name):
+  try:
+      result = s3_client.get_bucket_lifecycle_configuration(Bucket=bucket_name)
+  except ClientError as e:
+      return None
+  except Exception as e:
+      raise Exception( "Unexpected error in get_bucket_lifecycle_of_s3 function: " + e.__str__())
+  return result
+
+def put_bucket_lifecycle_of_s3(s3_resource, bucket_name):
+  #s3 = boto3.resource('s3')
+  bucket_lifecycle_configuration = s3_resource.BucketLifecycleConfiguration(bucket_name)
+  response = bucket_lifecycle_configuration.put(
+    LifecycleConfiguration={
+        'Rules': [
+             {
+               "Expiration":{
+                  "Days":365
+                },
+                "ID":"DefaultSHARRRetention",
+                "Status":"Enabled",
+                "Filter": {
+                  "Prefix": ""
+                },
+                "NoncurrentVersionExpiration":{
+                    "NoncurrentDays":45
+                },
+                "AbortIncompleteMultipartUpload":{
+                  "DaysAfterInitiation":30
+                }
+              }
+        ]
+    }
+  )  
+  return response
+
+def create_bucket(s3_client, bucket_name, region):
+  """Create an S3 bucket in a specified region
+
+  If a region is not specified, the bucket is created in the S3 default
+  region (us-east-1).
+
+  :param bucket_name: Bucket to create
+  :param region: String region to create bucket in, e.g., 'us-west-2'
+  :return: True if bucket created, else False
+  """
+
+  # Create bucket
+  try:
+    if region != 'us-east-1':
+        bucket = s3_client.create_bucket(
+          Bucket=bucket_name,
+          ACL='private',
+          CreateBucketConfiguration={ 
+            'LocationConstraint': region
+          },
+          ObjectLockEnabledForBucket=False,
+          ObjectOwnership='BucketOwnerEnforced'
+        ) 
+        logging.info(bucket)
+    else:
+        bucket = s3_client.create_bucket(
+          Bucket=bucket_name,
+          ACL='private',
+          ObjectLockEnabledForBucket=False,
+          ObjectOwnership='BucketOwnerEnforced'
+        ) 
+        logging.info(bucket)
+    
+    response = s3_client.put_bucket_encryption(
+        Bucket=bucket_name,
+        ServerSideEncryptionConfiguration={
+            "Rules": [
+                {"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}
+            ]
+        },
+    )   
+    response = s3_client.put_bucket_versioning(
+        Bucket=bucket_name,
+        VersioningConfiguration={
+            'Status': 'Enabled'
+        },
+    )
+    
+    response = s3_client.put_public_access_block(
+        Bucket=bucket_name,
+        PublicAccessBlockConfiguration={
+            'BlockPublicAcls': True,
+            'IgnorePublicAcls': True,
+            'BlockPublicPolicy': True,
+            'RestrictPublicBuckets': True
+        }
+    )
+    print(response)
+    
+  except ClientError as e:
+    logging.error(e)
+    return False
+  return True
+
+def updateBucketPolicies(s3_client, s3_resource, bucketName, storageBucket, targetPrefix):
+  # Get the existing policy document
+  # Retrieve the policy of the specified bucket
+  
+  bucketArn = 'arn:aws:s3:::'+bucketName+'/*'
+  matchedLogging = False
+  matchedSSL = False
+  updatePolicy = False
+  statements = []
+  try:
+    result = s3_client.get_bucket_policy(Bucket=storageBucket)
+    policy = eval(result['Policy'])
+    statements = policy['Statement']
+    for statement in statements:
+
+      try:
+        if statement['Principal']['Service'] == 'logging.s3.amazonaws.com':
+          matchedLogging = True
+      except:
+        pass
+
+      try:
+        if statement['Effect'] == 'Deny' and statement['Condition']['Bool']['aws:SecureTransport'] == "false":
+          matchedSSL = True
+      except:
+        pass
+
+
+    
+  except botocore.exceptions.ClientError as error:
+    print(error.response['Error']['Code'])
+    print('Creating a new policy')
+    policy = json.loads('{ "Id": "SharrNewBucketPolicy", "Version": "2012-10-17","Statement": [{ "Sid": "AllowSSLRequestsOnly","Action": "s3:*","Effect": "Deny","Resource": ["arn:aws:s3:::'+storageBucket+'","arn:aws:s3:::'+storageBucket+'/*" ], "Condition": {"Bool": { "aws:SecureTransport": "false"  } },  "Principal": "*"  }]}')
+    updatePolicy = True
+    statements = []
+    
+  if matchedSSL:
+    print(storageBucket + ' already has a policy statement for SSL Only')
+  else:
+    print('Adding SSL Only to policy')
+    newStatement = json.loads('{"Sid": "SHARRS3PolicyStmtSSLOnly","Action": "s3:*","Effect": "Deny","Resource": ["arn:aws:s3:::'+storageBucket+'","arn:aws:s3:::'+storageBucket+'/*"],"Condition": {"Bool": {"aws:SecureTransport": "false"}},"Principal": "*"}')
+    statements.append(newStatement)
+    updatePolicy = True
+    
+  if matchedLogging:
+    print(storageBucket + ' already has a policy statement to allow logging.s3.amazonaws.com for '+ bucketName)
+  else:
+    print('Adding Logging to policy')
+    newStatement = json.loads('{"Sid": "SHARRS3PolicyStmt-DO-NOT-MODIFY-'+str(int(time.time()))+'", "Effect":"Allow","Principal":{"Service": "logging.s3.amazonaws.com"},"Action":"s3:PutObject","Resource":"arn:aws:s3:::'+storageBucket+'/*"}')
+    statements.append(newStatement)
+    updatePolicy = True
+    
+  if updatePolicy:
+    policy['Statement'] = statements
+    # Convert the policy from JSON dict to string
+    bucket_policy = json.dumps(policy)
+    # Set the new policy
+    s3_client.put_bucket_policy(Bucket=storageBucket, Policy=bucket_policy)
+    print(storageBucket+' Policy updated')
+  
+  #print(get_bucket_lifecycle_of_s3(s3, storageBucket))
+  if get_bucket_lifecycle_of_s3(s3_client, storageBucket) == None:
+    print("Adding a 365 day default retention policy")
+    print(put_bucket_lifecycle_of_s3(s3_resource,storageBucket))
+    
+  else:
+    print("Lifecycle policy found - not altering existing policy")
+    #print(get_bucket_lifecycle_of_s3(s3, storageBucket))  
+    
+  return
+
+def lambda_handler(event, context):
+  resourceId = event['Resource']['Id']
+  region = event['Finding']['Region']
+  bucketArray = resourceId.split(':')
+  fixmeBucket = bucketArray[-1]
+  AwsAccountId = event['Finding']['AwsAccountId']
+  destBucket = 'cnxc-s3-server-access-logging-' + AwsAccountId + '-' + region
+  targetPrefix = fixmeBucket+'/'
+  
+  my_config = Config(
+    region_name = event['Finding']['Region'],
+  )
+  
+  s3_client = boto3.client('s3', config=my_config)
+  s3_resource = boto3.resource('s3', config=my_config)
+
+  print(fixmeBucket, destBucket, targetPrefix)
+  if fixmeBucket == destBucket:
+      return {
+        'output':
+          {
+            'message': 'This bucket is exempt from logging as it would create a circular log effect',
+          }
+      }
+  create_bucket(s3_client, destBucket, region)
+  updateBucketPolicies(s3_client, s3_resource, fixmeBucket, destBucket, targetPrefix)
+  return {
+    'output':
+      {
+        'message': 'Bucket created/updated',
+      }
+  }",
+              },
+              "isCritical": true,
+              "isEnd": false,
+              "maxAttempts": 2,
+              "name": "CreateDestinationBucket",
+              "timeoutSeconds": 60,
+            },
+            {
+              "action": "aws:executeScript",
+              "description": "## Add S3 Server Access Loging to the finding bucket
+
+## Outputs
+A JSON formatted response.  Example:
+...
+   {
+    'message': 'Server Access Logging Successfully Set.',
+    'resourceBucketName': 'finding-bucket-name,
+    'LoggingBucketName': 'bucketname-to-write-logs-to',
+    'LoggingPrefix': 'finding-bucket-name/',
+    'status': 'RESOLVED'
+   }
+...
+",
+              "inputs": {
+                "Handler": "lambda_handler",
+                "InputPayload": {
+                  "Finding": "{{Finding}}",
+                  "Resource": "{{Resource}}",
+                },
+                "Runtime": "python3.8",
+                "Script": "import logging
+import copy
+import json
+import time
+from pprint import pprint
+import botocore
+import boto3
+from botocore.exceptions import ClientError
+
+
+def enableAccessLogging(s3, bucketName, storageBucket, targetPrefix):
+  print("Now setting logging on", bucketName)
+  return s3.put_bucket_logging(
+      Bucket=bucketName,
+      BucketLoggingStatus={
+          'LoggingEnabled': {
+              'TargetBucket': storageBucket,
+              'TargetPrefix': targetPrefix
+          }
+      }
+  )
+
+def lambda_handler(event, context):
+  s3_client = boto3.client('s3')
+  s3 = boto3.resource('s3')
+  resourceId = event['Resource']['Id']
+  region = event['Resource']['Region']
+  bucketArray = resourceId.split(':')
+  fixmeBucket = bucketArray[-1]
+  AwsAccountId = event['Finding']['AwsAccountId']
+  destBucket = 'cnxc-s3-server-access-logging-' + AwsAccountId + '-' + region
+  targetPrefix = fixmeBucket+'/'
+  
+  print(fixmeBucket, destBucket, targetPrefix)
+  if fixmeBucket == destBucket:
+      return {
+        'output':
+          {
+            'message': 'This bucket is exempt from logging as it would create a circular log effect',
+            'resourceBucketName': fixmeBucket,
+            'LoggingBucketName': destBucket,
+            'LoggingPrefix': targetPrefix,
+            'status': 'SUPPRESSED'
+          }
+      }
+
+  output = enableAccessLogging(s3_client, fixmeBucket, destBucket, targetPrefix)
+  return {
+    'output':
+      {
+        'message': 'Server Access Logging Successfully Set.',
+        'resourceBucketName': fixmeBucket,
+        'LoggingBucketName': destBucket,
+        'LoggingPrefix': targetPrefix,
+        'status': 'RESOLVED'
+      }
+  }",
+              },
+              "isCritical": true,
+              "isEnd": true,
+              "name": "RemediateTargetBucket",
+              "outputs": [
+                {
+                  "Name": "RemediationResultMessage",
+                  "Selector": "$.Payload.output.message",
+                  "Type": "String",
+                },
+                {
+                  "Name": "RemediationResultStatus",
+                  "Selector": "$.Payload.output.status",
+                  "Type": "String",
+                },
+              ],
+              "timeoutSeconds": 60,
+            },
+          ],
+          "outputs": [
+            "RemediateTargetBucket.RemediationResultStatus",
+            "RemediateTargetBucket.RemediationResultMessage",
+          ],
+          "parameters": {
+            "AutomationAssumeRole": {
+              "allowedPattern": "^arn:(?:aws|aws-us-gov|aws-cn):iam::\\d{12}:role/[\\w+=,.@-]+$",
+              "description": "(Required) The ARN of the role that allows Automation to perform the actions on your behalf.",
+              "type": "String",
+            },
+            "Finding": {
+              "type": "StringMap",
+            },
+            "Resource": {
+              "type": "StringMap",
+            },
+          },
+          "schemaVersion": "0.3",
+        },
+        "DocumentFormat": "YAML",
+        "DocumentType": "Automation",
+        "Name": "ASR-ConfigureS3ServerAccessLogging",
+        "UpdateMethod": "NewVersion",
+      },
+      "Type": "AWS::SSM::Document",
+    },
     "ASRConfigureSNSTopicForStack": {
       "DependsOn": [
         "CreateWait4",
@@ -4026,6 +4407,128 @@ def reset_to_recognized_state(topic_arn):
         "DocumentFormat": "YAML",
         "DocumentType": "Automation",
         "Name": "ASR-EnableDeliveryStatusLoggingForSNSTopic",
+        "UpdateMethod": "NewVersion",
+      },
+      "Type": "AWS::SSM::Document",
+    },
+    "ASREnableDynamoDBPITR": {
+      "DependsOn": [
+        "CreateWait8",
+      ],
+      "Properties": {
+        "Content": {
+          "assumeRole": "{{ AutomationAssumeRole }}",
+          "description": "### Document name - ASR-EnableDDBPointInTimeRecovery
+
+## What does this document do?
+Enables Point In Time Recovery on a DynamoDB Table:
+* Turns on PITR for specified table.
+
+## Input Parameters
+* AutomationAssumeRole: (Required) The Amazon Resource Name (ARN) of the AWS Identity and Access Management (IAM) role that allows Systems Manager Automation to perform the actions on your behalf.
+* DDBTableArn: Table arn to set PITR Recovery on
+
+## Output Parameters
+* Remediation.Output: STDOUT and messages from the remediation steps.
+",
+          "mainSteps": [
+            {
+              "action": "aws:executeScript",
+              "inputs": {
+                "Handler": "lambda_handler",
+                "InputPayload": {
+                  "tableArn": "{{DDBTableArn}}",
+                  "tableRegion": "{{global:REGION}}",
+                },
+                "Runtime": "python3.8",
+                "Script": "# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
+
+def connect_to_dynamodb(region, boto_config):
+    return boto3.client('dynamodb', region_name=region, config=boto_config)
+
+def lambda_handler(event, context):
+    """
+    remediates DynamoDB.2 by enabling Point In Time Recovery
+    On success returns a string map
+    On failure returns NoneType
+    """
+    boto_config = Config(
+        retries ={
+          'mode': 'standard'
+        }
+    )
+    
+    splitEnv = event['tableArn'].split(":")
+    splitTable = splitEnv[5].split("/")
+    
+    if (splitTable[0] != 'table' and splitTable[0] != 'global-table') or splitEnv[0] != 'arn' or splitEnv[1] != 'aws' or splitEnv[2] != 'dynamodb':
+        print("Invalid DynamoDB arn of ",event['tableArn'])
+        return {
+            "response": {
+                "message": f'Invalid DynamoDB arn {event["tableArn"]}',
+                "status": "Failed"
+            }
+        }
+        
+    tablename = splitTable[1]
+    region = splitEnv[3]
+    account = splitEnv[4]
+    #print(account,region,tablename)
+
+    ddb_client = connect_to_dynamodb(region, boto_config)
+    
+    try:
+        ddb_client.update_continuous_backups(
+            TableName=tablename,
+            PointInTimeRecoverySpecification={
+                'PointInTimeRecoveryEnabled': True
+            }
+        )
+        return {
+            "response": {
+                "message": f'Enabled PITR on {tablename}',
+                "status": "Success"
+            }
+        }
+    except Exception as e:
+        exit(f'Error setting PITR: {str(e)}')",
+              },
+              "isEnd": true,
+              "name": "Remediation",
+              "outputs": [
+                {
+                  "Name": "Output",
+                  "Selector": "$.Payload.response",
+                  "Type": "StringMap",
+                },
+              ],
+            },
+          ],
+          "outputs": [
+            "Remediation.Output",
+          ],
+          "parameters": {
+            "AutomationAssumeRole": {
+              "allowedPattern": "^arn:(?:aws|aws-us-gov|aws-cn):iam::\\d{12}:role/[\\w+=,.@-]+$",
+              "description": "(Required) The ARN of the role that allows Automation to perform the actions on your behalf.",
+              "type": "String",
+            },
+            "DDBTableArn": {
+              "allowedPattern": ".*",
+              "description": "The ARN of a DynamoDB table to set PITR on",
+              "type": "String",
+            },
+          },
+          "schemaVersion": "0.3",
+        },
+        "DocumentFormat": "YAML",
+        "DocumentType": "Automation",
+        "Name": "ASR-EnableDynamoDB_PITR",
         "UpdateMethod": "NewVersion",
       },
       "Type": "AWS::SSM::Document",
@@ -7770,7 +8273,7 @@ def add_ssl_bucket_policy(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "dff26ffe5bc8a2eb7a84297f591aa46181b17efa8b7c977636db9cf3beeec61c",
+        "DocumentPropertiesHash": "e345a408cdf752a0bea40383c6618f8600fc92f4ef20d11b15a2e5f507391302",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -7957,14 +8460,16 @@ def add_ssl_bucket_policy(event, _):
     "DeletWait8": {
       "DeletionPolicy": "Delete",
       "DependsOn": [
+        "ASRConfigureS3ServerAccessLogging",
         "ASRDisablePublicIPAutoAssign",
         "ASREnableDeliveryStatusLoggingForSNSTopic",
+        "ASREnableDynamoDBPITR",
         "DeletWait7",
       ],
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "dff26ffe5bc8a2eb7a84297f591aa46181b17efa8b7c977636db9cf3beeec61c",
+        "DocumentPropertiesHash": "e345a408cdf752a0bea40383c6618f8600fc92f4ef20d11b15a2e5f507391302",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },

@@ -1,0 +1,39 @@
+https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.1.cnxc.1/aws-sharr-deploy.template
+https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.1.cnxc.1/aws-sharr-member.template
+https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.1.cnxc.1/aws-sharr-member-roles.template
+
+
+AWSControlTower-SHARR-MemberRoles
+
+SO0111-SHARR-Orchestrator-Admin
+
+aws-foundational-security-best-practices/v/1.0.0/S3.9
+ASR-AFSBP_1.0.0_S3
+
+ARCH 802214760415
+
+"ProductName": "Security Hub",
+"GeneratorId": "aws-foundational-security-best-practices/v/1.0.0/KMS.2",
+
+"Resources:0/Id": 
+role/datadog-forwarder-ForwarderRole-
+role/service-role/
+cdk-
+AWS-QuickSetup-StackSet-Local-AdministrationRole
+
+
+aws-foundational-security-best-practices/v/1.0.0/Lambda.2
+-LogRetention
+-CustomS3AutoDeleteObjects
+
+
+
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*"
+
+crr-amazon-connect-cc2c36cb85c2      512429602839   Prod-Cross-Com
+uug-prod-records-bucket              078762791986   United Urology Group
+           977959890219     Prod-BCBSA
+                
+

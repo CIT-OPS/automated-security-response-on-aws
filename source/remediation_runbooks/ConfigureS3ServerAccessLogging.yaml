@@ -1,0 +1,82 @@
+description: |
+  ### Document Name - ASR-ConfigureS3ServerAccessLogging
+
+  ## What does this document do?
+  This document is used to create or modify an Amazon S3 bucket for the s3 access logs in this account and region.  If the bucket already exists,
+  then no error is thrown and the bucket will be used as a destination of this finding resource bucket access logs.
+
+  ## Input Parameters
+  * BucketName: (Required) Name of the S3 bucket (not the ARN).
+  * DestBucketName: (Required) Name of the S3 bucket to write the logs to (not the ARN)
+  * AutomationAssumeRole: (Required) The ARN of the role that allows Automation to perform the actions on your behalf.
+
+  ## Output Parameters
+  * GetBucketPublicAccessBlock.Output - JSON formatted response from the GetPublicAccessBlock APAfI call
+schemaVersion: '0.3'
+assumeRole: '{{ AutomationAssumeRole }}'
+outputs:
+  - RemediateTargetBucket.RemediationResultStatus
+  - RemediateTargetBucket.RemediationResultMessage
+parameters:
+  Finding:
+    type: StringMap
+  Resource:
+    type: StringMap
+  AutomationAssumeRole:
+    type: String
+    description: (Required) The ARN of the role that allows Automation to perform the actions on your behalf.
+    allowedPattern: '^arn:(?:aws|aws-us-gov|aws-cn):iam::\d{12}:role/[\w+=,.@-]+$'
+mainSteps:
+  - name: CreateDestinationBucket
+    action: 'aws:executeScript'
+    description: |
+      ## CreateDestinationBucket
+      Creates the S3 Log destination bucket if needed.
+      ## Outputs
+      * Output: None
+    isEnd: false
+    inputs:
+      Runtime: python3.8
+      Handler: lambda_handler
+      InputPayload:
+        Resource: '{{ Resource }}'
+        Finding: '{{Finding}}'
+      Script: |-
+        %%SCRIPT=CreateServerAccessLogging_CreateDestBucket.py%%
+    isCritical: true
+    maxAttempts: 2
+    timeoutSeconds: 60
+  - name: RemediateTargetBucket
+    action: 'aws:executeScript'
+    description: |
+      ## Add S3 Server Access Loging to the finding bucket
+
+      ## Outputs
+      A JSON formatted response.  Example:
+      ...
+         {
+          'message': 'Server Access Logging Successfully Set.',
+          'resourceBucketName': 'finding-bucket-name,
+          'LoggingBucketName': 'bucketname-to-write-logs-to',
+          'LoggingPrefix': 'finding-bucket-name/',
+          'status': 'RESOLVED'
+         }
+      ...
+    timeoutSeconds: 60
+    isCritical: true
+    isEnd: true
+    inputs:
+      Runtime: python3.8
+      Handler: lambda_handler
+      InputPayload:
+        Resource: '{{Resource}}'
+        Finding: '{{Finding}}'
+      Script: |-
+        %%SCRIPT=CreateServerAccessLogging_ApplyConfig.py%%
+    outputs:
+      - Name: RemediationResultMessage
+        Selector: $.Payload.output.message
+        Type: String
+      - Name: RemediationResultStatus
+        Selector: $.Payload.output.status
+        Type: String
