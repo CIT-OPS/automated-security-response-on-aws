@@ -71,14 +71,14 @@ class FindingEvent:
         self.resource_id_matches = []
 
         if parse_id_pattern:
-            print(parse_id_pattern,identifier_raw)
+            print(f"parse_id_pattern {parse_id_pattern} identifier_raw {identifier_raw}")
             identifier_match = re.match(
                 parse_id_pattern,
                 identifier_raw
             )
-            print("identifier match",identifier_match)
-
+            
             if identifier_match:
+                print("groups",identifier_match.groups())
                 for group in range(1, len(identifier_match.groups())+1):
                     self.resource_id_matches.append(identifier_match.group(group))
                 self.resource_id = identifier_match.group(resource_index)
@@ -210,104 +210,99 @@ def parse_event(event, _):
 
 def main():
     finding = {
-  "SchemaVersion": "2018-10-08",
-  "Id": "arn:aws:securityhub:us-east-1:802214760415:subscription/aws-foundational-security-best-practices/v/1.0.0/DynamoDB.2/finding/9851b39f-3c7a-43a5-b59b-95000595e1ce",
-  "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
-  "ProductName": "Security Hub",
-  "CompanyName": "AWS",
-  "Region": "us-east-1",
-  "GeneratorId": "aws-foundational-security-best-practices/v/1.0.0/DynamoDB.2",
-  "AwsAccountId": "802214760415",
-  "Types": [
-    "Software and Configuration Checks/Industry and Regulatory Standards/AWS-Foundational-Security-Best-Practices"
-  ],
-  "FirstObservedAt": "2023-08-01T11:59:02.739Z",
-  "LastObservedAt": "2023-08-01T11:59:14.661Z",
-  "CreatedAt": "2023-08-01T11:59:02.739Z",
-  "UpdatedAt": "2023-08-01T11:59:02.739Z",
-  "Severity": {
-    "Product": 40,
-    "Label": "MEDIUM",
-    "Normalized": 40,
-    "Original": "MEDIUM"
-  },
-  "Title": "DynamoDB.2 DynamoDB tables should have point-in-time recovery enabled",
-  "Description": "This control checks whether point-in-time recovery (PITR) is enabled for a DynamoDB table.",
-  "Remediation": {
-    "Recommendation": {
-      "Text": "For information on how to correct this issue, consult the AWS Security Hub controls documentation.",
-      "Url": "https://docs.aws.amazon.com/console/securityhub/DynamoDB.2/remediation"
-    }
-  },
-  "ProductFields": {
-    "StandardsArn": "arn:aws:securityhub:::standards/aws-foundational-security-best-practices/v/1.0.0",
-    "StandardsSubscriptionArn": "arn:aws:securityhub:us-east-1:802214760415:subscription/aws-foundational-security-best-practices/v/1.0.0",
-    "ControlId": "DynamoDB.2",
-    "RecommendationUrl": "https://docs.aws.amazon.com/console/securityhub/DynamoDB.2/remediation",
-    "RelatedAWSResources:0/name": "securityhub-dynamodb-pitr-enabled-47ef5d7d",
-    "RelatedAWSResources:0/type": "AWS::Config::ConfigRule",
-    "StandardsControlArn": "arn:aws:securityhub:us-east-1:802214760415:control/aws-foundational-security-best-practices/v/1.0.0/DynamoDB.2",
-    "aws/securityhub/ProductName": "Security Hub",
-    "aws/securityhub/CompanyName": "AWS",
-    "Resources:0/Id": "arn:aws:dynamodb:us-east-1:802214760415:table/test-sharr-no-pitr-2",
-    "aws/securityhub/FindingId": "arn:aws:securityhub:us-east-1::product/aws/securityhub/arn:aws:securityhub:us-east-1:802214760415:subscription/aws-foundational-security-best-practices/v/1.0.0/DynamoDB.2/finding/9851b39f-3c7a-43a5-b59b-95000595e1ce"
-  },
-  "UserDefinedFields": {
-    "Platform": "",
-    "securityContact": " Security Contact Details: Name:James R Daley | Title:Associate Director AWS Architecture | Email:jim.daley@concentrix.com | Phone +1 469-964-8040",
-    "Dept": "Hosted",
-    "OU": "testOU",
-    "Enriched": "True",
-    "Client": "Architecture Lab",
-    "Name": "Architecture Lab",
-    "jira": "kenneth.papagno@concentrix.com",
-    "AccountName": "Lab-Architecture"
-  },
-  "Resources": [
-    {
-      "Type": "AwsDynamoDbTable",
-      "Id": "arn:aws:dynamodb:us-east-1:802214760415:table/test-sharr-no-pitr-2",
-      "Partition": "aws",
-      "Region": "us-east-1"
-    }
-  ],
-  "Compliance": {
-    "Status": "FAILED",
-    "SecurityControlId": "DynamoDB.2",
-    "AssociatedStandards": [
-      {
-        "StandardsId": "standards/aws-foundational-security-best-practices/v/1.0.0"
+    "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+    "Types": [
+      "Software and Configuration Checks/Industry and Regulatory Standards"
+    ],
+    "Description": "This control checks whether point-in-time recovery (PITR) is enabled for a DynamoDB table.",
+    "Compliance": {
+      "Status": "FAILED",
+      "SecurityControlId": "DynamoDB.2",
+      "AssociatedStandards": [
+        {
+          "StandardsId": "standards/aws-foundational-security-best-practices/v/1.0.0"
+        }
+      ]
+    },
+    "ProductName": "Security Hub",
+    "FirstObservedAt": "2023-09-05T23:42:00.140Z",
+    "CreatedAt": "2023-09-05T23:42:00.140Z",
+    "LastObservedAt": "2023-09-05T23:42:14.825Z",
+    "CompanyName": "AWS",
+    "FindingProviderFields": {
+      "Types": [
+        "Software and Configuration Checks/Industry and Regulatory Standards"
+      ],
+      "Severity": {
+        "Normalized": 40,
+        "Label": "MEDIUM",
+        "Original": "MEDIUM"
       }
-    ]
-  },
-  "WorkflowState": "NEW",
-  "Workflow": {
-    "Status": "NEW"
-  },
-  "RecordState": "ACTIVE",
-  "Note": {
-    "Text": "Account Name: Lab-Architecture OU Name: testOU Tags: Platform=, Client=Architecture Lab, Dept=Hosted, Name=Architecture Lab, jira=kenneth.papagno@concentrix.com Security Contact Details: Name:James R Daley | Title:Associate Director AWS Architecture | Email:jim.daley@concentrix.com | Phone +1 469-964-8040",
-    "UpdatedBy": "Security Hub - Enrichment Automation",
-    "UpdatedAt": "2023-08-01T11:59:23.101Z"
-  },
-  "FindingProviderFields": {
+    },
+    "ProductFields": {
+      "RelatedAWSResources:0/name": "securityhub-dynamodb-pitr-enabled-ae09b360",
+      "RelatedAWSResources:0/type": "AWS::Config::ConfigRule",
+      "aws/securityhub/ProductName": "Security Hub",
+      "aws/securityhub/CompanyName": "AWS",
+      "Resources:0/Id": "arn:aws:dynamodb:us-east-1:332241576022:table/test_delete_me",
+      "aws/securityhub/FindingId": "arn:aws:securityhub:us-east-1::product/aws/securityhub/arn:aws:securityhub:us-east-1:332241576022:security-control/DynamoDB.2/finding/a6a913d6-24db-4554-aa79-9c4fa457e6c8"
+    },
+    "Remediation": {
+      "Recommendation": {
+        "Text": "For information on how to correct this issue, consult the AWS Security Hub controls documentation.",
+        "Url": "https://docs.aws.amazon.com/console/securityhub/DynamoDB.2/remediation"
+      }
+    },
+    "SchemaVersion": "2018-10-08",
+    "GeneratorId": "security-control/DynamoDB.2",
+    "RecordState": "ACTIVE",
+    "Title": "DynamoDB tables should have point-in-time recovery enabled",
+    "Workflow": {
+      "Status": "NEW"
+    },
     "Severity": {
+      "Normalized": 40,
       "Label": "MEDIUM",
       "Original": "MEDIUM"
     },
-    "Types": [
-      "Software and Configuration Checks/Industry and Regulatory Standards/AWS-Foundational-Security-Best-Practices"
-    ]
-  },
-  "ProcessedAt": "2023-08-01T11:59:23.136Z"
-}
-
+    "UpdatedAt": "2023-09-05T23:42:00.140Z",
+    "WorkflowState": "NEW",
+    "AwsAccountId": "332241576022",
+    "Region": "us-east-1",
+    "Id": "arn:aws:securityhub:us-east-1:332241576022:security-control/DynamoDB.2/finding/a6a913d6-24db-4554-aa79-9c4fa457e6c8",
+    "Resources": [
+      {
+        "Partition": "aws",
+        "Type": "AwsDynamoDbTable",
+        "Region": "us-east-1",
+        "Id": "arn:aws:dynamodb:us-east-1:332241576022:table/test_delete_me"
+      }
+    ],
+    "Note": {
+      "UpdatedBy": "Security Hub - Enrichment Automation",
+      "Text": "Account Name: SecurityHub-Admin OU Name: citCore Tags: Platform=Core Services, Client=SharedAllocation_All, Dept=SharedAllocation, Name=SecurityHub-Admin Security Contact Details: Name:James R Daley | Title:Associate Director AWS Architecture | Email:jim.daley@concentrix.com | Phone +1 469-964-8040",
+      "UpdatedAt": "2023-09-05T23:42:28.546Z"
+    },
+    "UserDefinedFields": {
+      "Platform": "Core Services",
+      "securityContact": " Security Contact Details: Name:James R Daley | Title:Associate Director AWS Architecture | Email:jim.daley@concentrix.com | Phone +1 469-964-8040",
+      "Dept": "SharedAllocation",
+      "OU": "citCore",
+      "Enriched": "True",
+      "Client": "SharedAllocation_All",
+      "Name": "SecurityHub-Admin",
+      "AccountName": "SecurityHub-Admin"
+    },
+    "ProcessedAt": "2023-09-05T23:42:28.561Z"
+  }
     event = {}
     event['Finding'] = finding
     #event['parse_id_pattern'] = '^arn:(?:aws|aws-us-gov|aws-cn):dynamodb:(?:[a-z]{2}(?:-gov)?-[a-z]+-\d):\d{12}:.*'
-    event['parse_id_pattern'] = ''
+    event['parse_id_pattern'] = '^arn:(?:aws|aws-us-gov|aws-cn):dynamodb:(?:[a-z]{2}(?:-gov)?-[a-z]+-\d):\d{12}:table/(.*)$'
     event['expected_control_id'] = 'DynamoDB.2'
-    parse_event(event, None)
+    x =parse_event(event, None)
+    print(x)
     
 if __name__ == "__main__":
     main()
+    

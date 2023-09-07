@@ -235,7 +235,7 @@ exports[`Regional Documents 1`] = `
   "Resources": {
     "ASRConfigureS3BucketPublicAccessBlock": {
       "DependsOn": [
-        "CreateWait4",
+        "CreateWait5",
       ],
       "Properties": {
         "Content": {
@@ -579,38 +579,35 @@ def handler(event, context):
     },
     "ASRConfigureS3ServerAccessLogging": {
       "DependsOn": [
-        "CreateWait8",
+        "CreateWait4",
       ],
       "Properties": {
         "Content": {
           "assumeRole": "{{ AutomationAssumeRole }}",
-          "description": "### Document Name - ASR-ConfigureS3ServerAccessLogging
+          "description": "### Document name - ConfigureS3ServerAccessLogging
 
 ## What does this document do?
-This document is used to create or modify an Amazon S3 bucket for the s3 access logs in this account and region.  If the bucket already exists,
-then no error is thrown and the bucket will be used as a destination of this finding resource bucket access logs.
+Configures Bucket for S3 Server Access Logging:
+* Creates a logging bucket in account / region if required.
+* Validates the properties of the logging bucket.
+* Configures the finding bucket to log to the logging bucket, unless the finding bucket and logging bucket are the same name.
 
 ## Input Parameters
-* BucketName: (Required) Name of the S3 bucket (not the ARN).
-* DestBucketName: (Required) Name of the S3 bucket to write the logs to (not the ARN)
-* AutomationAssumeRole: (Required) The ARN of the role that allows Automation to perform the actions on your behalf.
+* AutomationAssumeRole: (Required) The Amazon Resource Name (ARN) of the AWS Identity and Access Management (IAM) role that allows Systems Manager Automation to perform the actions on your behalf.
+* BucketName: 
 
 ## Output Parameters
-* GetBucketPublicAccessBlock.Output - JSON formatted response from the GetPublicAccessBlock APAfI call
+* 
 ",
           "mainSteps": [
             {
               "action": "aws:executeScript",
-              "description": "## CreateDestinationBucket
-Creates the S3 Log destination bucket if needed.
-## Outputs
-* Output: None
-",
               "inputs": {
-                "Handler": "lambda_handler",
+                "Handler": "runbook_handler",
                 "InputPayload": {
-                  "Finding": "{{Finding}}",
-                  "Resource": "{{ Resource }}",
+                  "AccountId": "{{AccountId}}",
+                  "BucketName": "{{BucketName}}",
+                  "Region": "{{Region}}",
                 },
                 "Runtime": "python3.8",
                 "Script": "import logging
@@ -673,25 +670,38 @@ def create_bucket(s3_client, bucket_name, region):
   # Create bucket
   try:
     if region != 'us-east-1':
-        bucket = s3_client.create_bucket(
-          Bucket=bucket_name,
-          ACL='private',
-          CreateBucketConfiguration={ 
-            'LocationConstraint': region
-          },
-          ObjectLockEnabledForBucket=False,
-          ObjectOwnership='BucketOwnerEnforced'
-        ) 
-        logging.info(bucket)
+        try:
+          bucket = s3_client.create_bucket(
+            Bucket=bucket_name,
+            ACL='private',
+            CreateBucketConfiguration={ 
+              'LocationConstraint': region
+            },
+            ObjectLockEnabledForBucket=False,
+            ObjectOwnership='BucketOwnerEnforced'
+          ) 
+        except botocore.exceptions.ClientError as error:
+          if error.response['Error']['Code'] == 'BucketAlreadyExists':
+              logging.info(f"The server access log bucket {bucket_name} already exists")
+          else:
+              logging.error(f"Server access log bucket inaccessable {error.response['Error']['Code']}")
+          pass
     else:
-        bucket = s3_client.create_bucket(
-          Bucket=bucket_name,
-          ACL='private',
-          ObjectLockEnabledForBucket=False,
-          ObjectOwnership='BucketOwnerEnforced'
-        ) 
-        logging.info(bucket)
+        try:
+          bucket = s3_client.create_bucket(
+            Bucket=bucket_name,
+            ACL='private',
+            ObjectLockEnabledForBucket=False,
+            ObjectOwnership='BucketOwnerEnforced'
+          ) 
+        except botocore.exceptions.ClientError as error:
+          if error.response['Error']['Code'] == 'BucketAlreadyExists':
+              logging.info(f"The server access log bucket {bucket_name} already exists")
+          else:
+              logging.error(f"Server access log bucket inaccessable {error.response['Error']['Code']}")
+          pass
     
+    logging.info(f"Ensuring AES256 on {bucket_name}")
     response = s3_client.put_bucket_encryption(
         Bucket=bucket_name,
         ServerSideEncryptionConfiguration={
@@ -699,7 +709,9 @@ def create_bucket(s3_client, bucket_name, region):
                 {"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}
             ]
         },
-    )   
+    )
+
+    logging.info(f"Ensuring Versioning on {bucket_name}")   
     response = s3_client.put_bucket_versioning(
         Bucket=bucket_name,
         VersioningConfiguration={
@@ -707,6 +719,7 @@ def create_bucket(s3_client, bucket_name, region):
         },
     )
     
+    logging.info(f"Ensuring Public Access Block on {bucket_name}") 
     response = s3_client.put_public_access_block(
         Bucket=bucket_name,
         PublicAccessBlockConfiguration={
@@ -716,20 +729,20 @@ def create_bucket(s3_client, bucket_name, region):
             'RestrictPublicBuckets': True
         }
     )
-    print(response)
-    
   except ClientError as e:
     logging.error(e)
     return False
+  
   return True
 
-def updateBucketPolicies(s3_client, s3_resource, bucketName, storageBucket, targetPrefix):
+def updateBucketPolicies(s3_client, s3_resource, bucketName, storageBucket):
   # Get the existing policy document
   # Retrieve the policy of the specified bucket
   
   bucketArn = 'arn:aws:s3:::'+bucketName+'/*'
   matchedLogging = False
   matchedSSL = False
+  matchedTLS = False
   updatePolicy = False
   statements = []
   try:
@@ -749,13 +762,11 @@ def updateBucketPolicies(s3_client, s3_resource, bucketName, storageBucket, targ
           matchedSSL = True
       except:
         pass
-
-
     
   except botocore.exceptions.ClientError as error:
     print(error.response['Error']['Code'])
     print('Creating a new policy')
-    policy = json.loads('{ "Id": "SharrNewBucketPolicy", "Version": "2012-10-17","Statement": [{ "Sid": "AllowSSLRequestsOnly","Action": "s3:*","Effect": "Deny","Resource": ["arn:aws:s3:::'+storageBucket+'","arn:aws:s3:::'+storageBucket+'/*" ], "Condition": {"Bool": { "aws:SecureTransport": "false"  } },  "Principal": "*"  }]}')
+    policy = json.loads('{ "Id": "SharrNewBucketPolicy", "Version": "2012-10-17","Statement": []}')
     updatePolicy = True
     statements = []
     
@@ -794,66 +805,65 @@ def updateBucketPolicies(s3_client, s3_resource, bucketName, storageBucket, targ
     
   return
 
-def lambda_handler(event, context):
-  resourceId = event['Resource']['Id']
-  region = event['Finding']['Region']
-  bucketArray = resourceId.split(':')
-  fixmeBucket = bucketArray[-1]
-  AwsAccountId = event['Finding']['AwsAccountId']
+def runbook_handler(event, context):
+  serviceName = 's3'  # default
+  try:
+    bucketName = event['BucketName']
+  except Exception as e:
+    bucketName = ''
+    serviceName = event['logType']
+    pass
+
+  region = event['Region']
+  AwsAccountId = event['AccountId']
   destBucket = 'cnxc-s3-server-access-logging-' + AwsAccountId + '-' + region
-  targetPrefix = fixmeBucket+'/'
-  
-  my_config = Config(
-    region_name = event['Finding']['Region'],
-  )
-  
+  my_config = Config(region_name = region)
   s3_client = boto3.client('s3', config=my_config)
   s3_resource = boto3.resource('s3', config=my_config)
 
-  print(fixmeBucket, destBucket, targetPrefix)
-  if fixmeBucket == destBucket:
-      return {
-        'output':
-          {
-            'message': 'This bucket is exempt from logging as it would create a circular log effect',
-          }
-      }
+  # Create the Logging Bucket
   create_bucket(s3_client, destBucket, region)
-  updateBucketPolicies(s3_client, s3_resource, fixmeBucket, destBucket, targetPrefix)
+
+  # Update the Bucket Policies
+  updateBucketPolicies(s3_client, s3_resource, bucketName, destBucket)
+
   return {
-    'output':
-      {
-        'message': 'Bucket created/updated',
-      }
-  }",
+        'message': 'Logging bucket created and or verified',
+        'loggingBucketName': destBucket,
+        'status': 'RESOLVED'
+  }
+
+if __name__ == "__main__":
+    event = {
+       "BucketName": "needs-s39",
+       "AccountId": "332241576022",
+       "Region": "us-east-1"  
+    }
+    result = runbook_handler(event,"")
+    print(result)",
               },
-              "isCritical": true,
               "isEnd": false,
-              "maxAttempts": 2,
-              "name": "CreateDestinationBucket",
-              "timeoutSeconds": 60,
+              "name": "CreateLoggingBucket",
+              "outputs": [
+                {
+                  "Name": "LoggingBucketName",
+                  "Selector": "$.Payload.loggingBucketName",
+                  "Type": "String",
+                },
+                {
+                  "Name": "Status",
+                  "Selector": "$.Payload.status",
+                  "Type": "String",
+                },
+              ],
             },
             {
               "action": "aws:executeScript",
-              "description": "## Add S3 Server Access Loging to the finding bucket
-
-## Outputs
-A JSON formatted response.  Example:
-...
-   {
-    'message': 'Server Access Logging Successfully Set.',
-    'resourceBucketName': 'finding-bucket-name,
-    'LoggingBucketName': 'bucketname-to-write-logs-to',
-    'LoggingPrefix': 'finding-bucket-name/',
-    'status': 'RESOLVED'
-   }
-...
-",
               "inputs": {
-                "Handler": "lambda_handler",
+                "Handler": "runbook_handler",
                 "InputPayload": {
-                  "Finding": "{{Finding}}",
-                  "Resource": "{{Resource}}",
+                  "BucketName": "{{BucketName}}",
+                  "LoggingBucketName": "{{CreateLoggingBucket.LoggingBucketName}}",
                 },
                 "Runtime": "python3.8",
                 "Script": "import logging
@@ -867,86 +877,103 @@ from botocore.exceptions import ClientError
 
 
 def enableAccessLogging(s3, bucketName, storageBucket, targetPrefix):
-  print("Now setting logging on", bucketName)
-  return s3.put_bucket_logging(
-      Bucket=bucketName,
-      BucketLoggingStatus={
-          'LoggingEnabled': {
-              'TargetBucket': storageBucket,
-              'TargetPrefix': targetPrefix
-          }
-      }
-  )
+  print(f"Now setting logging on {bucketName} --> {storageBucket}/{targetPrefix}")
 
-def lambda_handler(event, context):
+def runbook_handler(event, context):
   s3_client = boto3.client('s3')
-  s3 = boto3.resource('s3')
-  resourceId = event['Resource']['Id']
-  region = event['Resource']['Region']
-  bucketArray = resourceId.split(':')
-  fixmeBucket = bucketArray[-1]
-  AwsAccountId = event['Finding']['AwsAccountId']
-  destBucket = 'cnxc-s3-server-access-logging-' + AwsAccountId + '-' + region
-  targetPrefix = fixmeBucket+'/'
+  bucketName = event['BucketName']
+  destBucket = event['LoggingBucketName']
+  targetPrefix = 'access_logs/s3/'+bucketName+'/'
   
-  print(fixmeBucket, destBucket, targetPrefix)
-  if fixmeBucket == destBucket:
+  if bucketName == destBucket:
       return {
         'output':
           {
             'message': 'This bucket is exempt from logging as it would create a circular log effect',
-            'resourceBucketName': fixmeBucket,
+            'resourceBucketName': bucketName,
             'LoggingBucketName': destBucket,
             'LoggingPrefix': targetPrefix,
             'status': 'SUPPRESSED'
           }
       }
 
-  output = enableAccessLogging(s3_client, fixmeBucket, destBucket, targetPrefix)
+  output = enableAccessLogging(s3_client, bucketName, destBucket, targetPrefix)
   return {
     'output':
       {
         'message': 'Server Access Logging Successfully Set.',
-        'resourceBucketName': fixmeBucket,
+        'resourceBucketName': bucketName,
         'LoggingBucketName': destBucket,
         'LoggingPrefix': targetPrefix,
         'status': 'RESOLVED'
       }
-  }",
+  }
+
+# if __name__ == "__main__":
+#     event = {
+#         "AutomationAssumeRole": 'arn:aws:iam::194039877044:role/StupidFingSubstitution',
+#         "BucketName": 'cnxc-inventory',
+#         "loggingBucketName": 'cnxc-s3-server-access-logging-194039877044-us-east-1',
+#     }
+#     result = lambda_handler(event,"")
+#     print(result)
+    ",
               },
-              "isCritical": true,
               "isEnd": true,
-              "name": "RemediateTargetBucket",
+              "name": "Remediation",
               "outputs": [
                 {
-                  "Name": "RemediationResultMessage",
-                  "Selector": "$.Payload.output.message",
+                  "Name": "message",
+                  "Selector": "$.Payload.message",
                   "Type": "String",
                 },
                 {
-                  "Name": "RemediationResultStatus",
-                  "Selector": "$.Payload.output.status",
+                  "Name": "resourceBucketName",
+                  "Selector": "$.Payload.resourceBucketName",
+                  "Type": "String",
+                },
+                {
+                  "Name": "loggingBucketName",
+                  "Selector": "$.Payload.LoggingBucketName",
+                  "Type": "String",
+                },
+                {
+                  "Name": "loggingPrefix",
+                  "Selector": "$.Payload.LoggingPrefix",
+                  "Type": "String",
+                },
+                {
+                  "Name": "status",
+                  "Selector": "$.Payload.status",
                   "Type": "String",
                 },
               ],
-              "timeoutSeconds": 60,
             },
           ],
           "outputs": [
-            "RemediateTargetBucket.RemediationResultStatus",
-            "RemediateTargetBucket.RemediationResultMessage",
+            "Remediation.message",
+            "Remediation.status",
           ],
           "parameters": {
+            "AccountId": {
+              "allowedPattern": "^[a-zA-Z0-9][a-zA-Z0-9-_]{0,255}$",
+              "description": "(Required) The account to work in.",
+              "type": "String",
+            },
             "AutomationAssumeRole": {
               "allowedPattern": "^arn:(?:aws|aws-us-gov|aws-cn):iam::\\d{12}:role/[\\w+=,.@-]+$",
               "description": "(Required) The ARN of the role that allows Automation to perform the actions on your behalf.",
               "type": "String",
             },
-            "Finding": {
-              "type": "StringMap",
+            "BucketName": {
+              "allowedPattern": "(?=^.{3,63}$)(?!^(\\d+\\.)+\\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\\-]*[a-z0-9])\\.)*([a-z0-9]|[a-z0-9][a-z0-9\\-]*[a-z0-9])$)",
+              "description": "(Required) The bucket name (not the ARN).",
+              "type": "String",
             },
-            "Resource": {
-              "type": "StringMap",
+            "Region": {
+              "allowedPattern": "^[a-zA-Z0-9][a-zA-Z0-9-_]{0,255}$",
+              "description": "(Required) The region to work in.",
+              "type": "String",
             },
           },
           "schemaVersion": "0.3",
@@ -4413,7 +4440,7 @@ def reset_to_recognized_state(topic_arn):
     },
     "ASREnableDynamoDBPITR": {
       "DependsOn": [
-        "CreateWait8",
+        "CreateWait5",
       ],
       "Properties": {
         "Content": {
@@ -4519,7 +4546,7 @@ def lambda_handler(event, context):
               "type": "String",
             },
             "DDBTableArn": {
-              "allowedPattern": ".*",
+              "allowedPattern": "(.*)$",
               "description": "The ARN of a DynamoDB table to set PITR on",
               "type": "String",
             },
@@ -4613,7 +4640,7 @@ Checks if EbsEncryptionByDefault is enabled correctly from the previous step.
     },
     "ASREnableEncryptionForSNSTopic": {
       "DependsOn": [
-        "CreateWait7",
+        "CreateWait8",
       ],
       "Properties": {
         "Content": {
@@ -4821,7 +4848,7 @@ Based on your data policy, Amazon SQS queues should be encrypted with different 
     },
     "ASREnableEnhancedMonitoringOnRDSInstance": {
       "DependsOn": [
-        "CreateWait5",
+        "CreateWait6",
       ],
       "Properties": {
         "Content": {
@@ -5019,7 +5046,7 @@ def handler(event, context):
     },
     "ASREnableKeyRotation": {
       "DependsOn": [
-        "CreateWait5",
+        "CreateWait6",
       ],
       "Properties": {
         "Content": {
@@ -5105,7 +5132,7 @@ Verifies that the KeyRotationEnabled is set to true for the given AWS KMS CMK.
     },
     "ASREnableMinorVersionUpgradeOnRDSDBInstance": {
       "DependsOn": [
-        "CreateWait7",
+        "CreateWait8",
       ],
       "Properties": {
         "Content": {
@@ -5287,7 +5314,7 @@ def verify_instance_changes(instance_id):
     },
     "ASREnableMultiAZOnRDSInstance": {
       "DependsOn": [
-        "CreateWait6",
+        "CreateWait7",
       ],
       "Properties": {
         "Content": {
@@ -6825,7 +6852,7 @@ def verify(function_name_to_check):
     },
     "ASRRemoveVPCDefaultSecurityGroupRules": {
       "DependsOn": [
-        "CreateWait6",
+        "CreateWait7",
       ],
       "Properties": {
         "Content": {
@@ -8205,7 +8232,7 @@ def add_ssl_bucket_policy(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "cbb21589711741582f016da0204b949e6bb393744d53b01dcc5383669d106dea",
+        "DocumentPropertiesHash": "ff97a6a9a6d1e293ebeaa111974b045549fbfd69dffb8c9f3359e77d7f0dc460",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8222,7 +8249,7 @@ def add_ssl_bucket_policy(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "6beab64cd1e1e29ec0dfac301f88b9a6eb2cf699bf743fbecf0fb88eca6f4f5c",
+        "DocumentPropertiesHash": "d7c3d6d3c0ab9bc602943822ced7c847fc851de4ffe8d1fea77f03d7f6b96663",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8239,7 +8266,7 @@ def add_ssl_bucket_policy(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "76ac9234ed21512ab7274d9f95c6a1ef847748fa697d122f7c3e1d7a1d74f010",
+        "DocumentPropertiesHash": "bedaeda2ca2ea31b71f99ed659cc7f57614337b193c98922b80764542d1c5f9f",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8256,7 +8283,7 @@ def add_ssl_bucket_policy(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "971be703d38efdd2d75a17325953419f3244f959e839b5a0668b12146968ac0c",
+        "DocumentPropertiesHash": "e32ee46fab35f81a97e0d081fc0c574766837a5f67fa1c62c4f491efcd247b02",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8273,7 +8300,7 @@ def add_ssl_bucket_policy(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "e345a408cdf752a0bea40383c6618f8600fc92f4ef20d11b15a2e5f507391302",
+        "DocumentPropertiesHash": "b18fbf07f382c98e4bb440cd884159ef6797fed75a9e6f17e0ddaafda1181678",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8372,7 +8399,7 @@ def add_ssl_bucket_policy(event, _):
     "DeletWait4": {
       "DeletionPolicy": "Delete",
       "DependsOn": [
-        "ASRConfigureS3BucketPublicAccessBlock",
+        "ASRConfigureS3ServerAccessLogging",
         "ASRConfigureSNSTopicForStack",
         "ASRCreateIAMSupportRole",
         "ASREnableAutomaticSnapshotsOnRedshiftCluster",
@@ -8382,7 +8409,7 @@ def add_ssl_bucket_policy(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "cbb21589711741582f016da0204b949e6bb393744d53b01dcc5383669d106dea",
+        "DocumentPropertiesHash": "ff97a6a9a6d1e293ebeaa111974b045549fbfd69dffb8c9f3359e77d7f0dc460",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8394,17 +8421,17 @@ def add_ssl_bucket_policy(event, _):
     "DeletWait5": {
       "DeletionPolicy": "Delete",
       "DependsOn": [
+        "ASRConfigureS3BucketPublicAccessBlock",
         "ASRConfigureS3PublicAccessBlock",
         "ASREnableCloudTrailLogFileValidation",
+        "ASREnableDynamoDBPITR",
         "ASREnableEbsEncryptionByDefault",
-        "ASREnableEnhancedMonitoringOnRDSInstance",
-        "ASREnableKeyRotation",
         "DeletWait4",
       ],
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "6beab64cd1e1e29ec0dfac301f88b9a6eb2cf699bf743fbecf0fb88eca6f4f5c",
+        "DocumentPropertiesHash": "d7c3d6d3c0ab9bc602943822ced7c847fc851de4ffe8d1fea77f03d7f6b96663",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8417,16 +8444,16 @@ def add_ssl_bucket_policy(event, _):
       "DeletionPolicy": "Delete",
       "DependsOn": [
         "ASREnableCopyTagsToSnapshotOnRDSCluster",
-        "ASREnableMultiAZOnRDSInstance",
+        "ASREnableEnhancedMonitoringOnRDSInstance",
+        "ASREnableKeyRotation",
         "ASREnableRDSClusterDeletionProtection",
         "ASREnableRDSInstanceDeletionProtection",
-        "ASRRemoveVPCDefaultSecurityGroupRules",
         "DeletWait5",
       ],
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "76ac9234ed21512ab7274d9f95c6a1ef847748fa697d122f7c3e1d7a1d74f010",
+        "DocumentPropertiesHash": "bedaeda2ca2ea31b71f99ed659cc7f57614337b193c98922b80764542d1c5f9f",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8439,8 +8466,8 @@ def add_ssl_bucket_policy(event, _):
       "DeletionPolicy": "Delete",
       "DependsOn": [
         "ASRDisablePublicAccessToRDSInstance",
-        "ASREnableEncryptionForSNSTopic",
-        "ASREnableMinorVersionUpgradeOnRDSDBInstance",
+        "ASREnableMultiAZOnRDSInstance",
+        "ASRRemoveVPCDefaultSecurityGroupRules",
         "ASRRevokeUnusedIAMUserCredentials",
         "ASRSetIAMPasswordPolicy",
         "DeletWait6",
@@ -8448,7 +8475,7 @@ def add_ssl_bucket_policy(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "971be703d38efdd2d75a17325953419f3244f959e839b5a0668b12146968ac0c",
+        "DocumentPropertiesHash": "e32ee46fab35f81a97e0d081fc0c574766837a5f67fa1c62c4f491efcd247b02",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8460,16 +8487,16 @@ def add_ssl_bucket_policy(event, _):
     "DeletWait8": {
       "DeletionPolicy": "Delete",
       "DependsOn": [
-        "ASRConfigureS3ServerAccessLogging",
         "ASRDisablePublicIPAutoAssign",
         "ASREnableDeliveryStatusLoggingForSNSTopic",
-        "ASREnableDynamoDBPITR",
+        "ASREnableEncryptionForSNSTopic",
+        "ASREnableMinorVersionUpgradeOnRDSDBInstance",
         "DeletWait7",
       ],
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "e345a408cdf752a0bea40383c6618f8600fc92f4ef20d11b15a2e5f507391302",
+        "DocumentPropertiesHash": "b18fbf07f382c98e4bb440cd884159ef6797fed75a9e6f17e0ddaafda1181678",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },

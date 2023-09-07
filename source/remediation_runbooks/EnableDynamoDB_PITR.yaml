@@ -19,14 +19,11 @@ parameters:
     type: String
     description: (Required) The ARN of the role that allows Automation to perform the actions on your behalf.
     allowedPattern: '^arn:(?:aws|aws-us-gov|aws-cn):iam::\d{12}:role/[\w+=,.@-]+$'
-  DDBTableArn:
+  TableArn:
     type: String
     description: The ARN of a DynamoDB table to set PITR on
-    allowedPattern: '.*'
-  DDBTableRegion:
-    type: String
-    description: The Region of a DynamoDB table to set PITR on
-    allowedPattern: '.*'
+    allowedPattern: '(.*)$'
+    
 outputs:
   - Remediation.Output
 
@@ -40,7 +37,7 @@ mainSteps:
         Type: StringMap
     inputs:
       InputPayload: 
-        tableArn: '{{DDBTableArn}}'
+        tableArn: '{{TableArn}}'
         tableRegion: '{{global:REGION}}'
       Runtime: python3.8
       Handler: lambda_handler
