@@ -1,82 +1,92 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+---
+schemaVersion: "0.3"
 description: |
-  ### Document Name - ASR-ConfigureS3ServerAccessLogging
+  ### Document name - ConfigureS3ServerAccessLogging
 
   ## What does this document do?
-  This document is used to create or modify an Amazon S3 bucket for the s3 access logs in this account and region.  If the bucket already exists,
-  then no error is thrown and the bucket will be used as a destination of this finding resource bucket access logs.
-
+  Configures Bucket for S3 Server Access Logging:
+  * Creates a logging bucket in account / region if required.
+  * Validates the properties of the logging bucket.
+  * Configures the finding bucket to log to the logging bucket, unless the finding bucket and logging bucket are the same name.
+  
   ## Input Parameters
-  * BucketName: (Required) Name of the S3 bucket (not the ARN).
-  * DestBucketName: (Required) Name of the S3 bucket to write the logs to (not the ARN)
-  * AutomationAssumeRole: (Required) The ARN of the role that allows Automation to perform the actions on your behalf.
+  * AutomationAssumeRole: (Required) The Amazon Resource Name (ARN) of the AWS Identity and Access Management (IAM) role that allows Systems Manager Automation to perform the actions on your behalf.
+  * BucketName: 
 
   ## Output Parameters
-  * GetBucketPublicAccessBlock.Output - JSON formatted response from the GetPublicAccessBlock APAfI call
-schemaVersion: '0.3'
-assumeRole: '{{ AutomationAssumeRole }}'
-outputs:
-  - RemediateTargetBucket.RemediationResultStatus
-  - RemediateTargetBucket.RemediationResultMessage
+  * 
+
+assumeRole: "{{ AutomationAssumeRole }}"
 parameters:
-  Finding:
-    type: StringMap
-  Resource:
-    type: StringMap
   AutomationAssumeRole:
     type: String
     description: (Required) The ARN of the role that allows Automation to perform the actions on your behalf.
     allowedPattern: '^arn:(?:aws|aws-us-gov|aws-cn):iam::\d{12}:role/[\w+=,.@-]+$'
+  BucketName:
+    type: String
+    description: (Required) The bucket name (not the ARN).
+    allowedPattern: (?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$)
+  Region:
+    type: String
+    description: (Required) The region to work in.
+    allowedPattern: '^[a-zA-Z0-9][a-zA-Z0-9-_]{0,255}$'
+  AccountId:
+    type: String
+    description: (Required) The account to work in.
+    allowedPattern: '^[a-zA-Z0-9][a-zA-Z0-9-_]{0,255}$'
+
+outputs:
+  - Remediation.message
+  - Remediation.status
+
 mainSteps:
-  - name: CreateDestinationBucket
+  -
+    name: CreateLoggingBucket
     action: 'aws:executeScript'
-    description: |
-      ## CreateDestinationBucket
-      Creates the S3 Log destination bucket if needed.
-      ## Outputs
-      * Output: None
-    isEnd: false
+    outputs:
+      - Name: LoggingBucketName
+        Selector: $.Payload.loggingBucketName
+        Type: String
+      - Name: Status
+        Selector: $.Payload.status
+        Type: String
     inputs:
-      Runtime: python3.8
-      Handler: lambda_handler
       InputPayload:
-        Resource: '{{ Resource }}'
-        Finding: '{{Finding}}'
+        BucketName: '{{BucketName}}'
+        Region: '{{Region}}'
+        AccountId: '{{AccountId}}'
+      Runtime: python3.8
+      Handler: runbook_handler
       Script: |-
         %%SCRIPT=CreateServerAccessLogging_CreateDestBucket.py%%
-    isCritical: true
-    maxAttempts: 2
-    timeoutSeconds: 60
-  - name: RemediateTargetBucket
+    isEnd: false
+  - name: Remediation
     action: 'aws:executeScript'
-    description: |
-      ## Add S3 Server Access Loging to the finding bucket
-
-      ## Outputs
-      A JSON formatted response.  Example:
-      ...
-         {
-          'message': 'Server Access Logging Successfully Set.',
-          'resourceBucketName': 'finding-bucket-name,
-          'LoggingBucketName': 'bucketname-to-write-logs-to',
-          'LoggingPrefix': 'finding-bucket-name/',
-          'status': 'RESOLVED'
-         }
-      ...
-    timeoutSeconds: 60
-    isCritical: true
-    isEnd: true
+    outputs:
+      - Name: message
+        Selector: $.Payload.message
+        Type: String
+      - Name: resourceBucketName
+        Selector: $.Payload.resourceBucketName
+        Type: String
+      - Name: loggingBucketName
+        Selector: $.Payload.LoggingBucketName
+        Type: String
+      - Name: loggingPrefix
+        Selector: $.Payload.LoggingPrefix
+        Type: String
+      - Name: status
+        Selector: $.Payload.status
+        Type: String
     inputs:
-      Runtime: python3.8
-      Handler: lambda_handler
       InputPayload:
-        Resource: '{{Resource}}'
-        Finding: '{{Finding}}'
+        BucketName: '{{BucketName}}'
+        LoggingBucketName: '{{CreateLoggingBucket.LoggingBucketName}}'
+      Runtime: python3.8
+      Handler: runbook_handler
       Script: |-
         %%SCRIPT=CreateServerAccessLogging_ApplyConfig.py%%
-    outputs:
-      - Name: RemediationResultMessage
-        Selector: $.Payload.output.message
-        Type: String
-      - Name: RemediationResultStatus
-        Selector: $.Payload.output.status
-        Type: String
+    isEnd: true
+  

@@ -58,25 +58,38 @@ def create_bucket(s3_client, bucket_name, region):
   # Create bucket
   try:
     if region != 'us-east-1':
-        bucket = s3_client.create_bucket(
-          Bucket=bucket_name,
-          ACL='private',
-          CreateBucketConfiguration={ 
-            'LocationConstraint': region
-          },
-          ObjectLockEnabledForBucket=False,
-          ObjectOwnership='BucketOwnerEnforced'
-        ) 
-        logging.info(bucket)
+        try:
+          bucket = s3_client.create_bucket(
+            Bucket=bucket_name,
+            ACL='private',
+            CreateBucketConfiguration={ 
+              'LocationConstraint': region
+            },
+            ObjectLockEnabledForBucket=False,
+            ObjectOwnership='BucketOwnerEnforced'
+          ) 
+        except botocore.exceptions.ClientError as error:
+          if error.response['Error']['Code'] == 'BucketAlreadyExists':
+              logging.info(f"The server access log bucket {bucket_name} already exists")
+          else:
+              logging.error(f"Server access log bucket inaccessable {error.response['Error']['Code']}")
+          pass
     else:
-        bucket = s3_client.create_bucket(
-          Bucket=bucket_name,
-          ACL='private',
-          ObjectLockEnabledForBucket=False,
-          ObjectOwnership='BucketOwnerEnforced'
-        ) 
-        logging.info(bucket)
+        try:
+          bucket = s3_client.create_bucket(
+            Bucket=bucket_name,
+            ACL='private',
+            ObjectLockEnabledForBucket=False,
+            ObjectOwnership='BucketOwnerEnforced'
+          ) 
+        except botocore.exceptions.ClientError as error:
+          if error.response['Error']['Code'] == 'BucketAlreadyExists':
+              logging.info(f"The server access log bucket {bucket_name} already exists")
+          else:
+              logging.error(f"Server access log bucket inaccessable {error.response['Error']['Code']}")
+          pass
     
+    logging.info(f"Ensuring AES256 on {bucket_name}")
     response = s3_client.put_bucket_encryption(
         Bucket=bucket_name,
         ServerSideEncryptionConfiguration={
@@ -84,7 +97,9 @@ def create_bucket(s3_client, bucket_name, region):
                 {"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}
             ]
         },
-    )   
+    )
+
+    logging.info(f"Ensuring Versioning on {bucket_name}")   
     response = s3_client.put_bucket_versioning(
         Bucket=bucket_name,
         VersioningConfiguration={
@@ -92,6 +107,7 @@ def create_bucket(s3_client, bucket_name, region):
         },
     )
     
+    logging.info(f"Ensuring Public Access Block on {bucket_name}") 
     response = s3_client.put_public_access_block(
         Bucket=bucket_name,
         PublicAccessBlockConfiguration={
@@ -101,20 +117,20 @@ def create_bucket(s3_client, bucket_name, region):
             'RestrictPublicBuckets': True
         }
     )
-    print(response)
-    
   except ClientError as e:
     logging.error(e)
     return False
+  
   return True
 
-def updateBucketPolicies(s3_client, s3_resource, bucketName, storageBucket, targetPrefix):
+def updateBucketPolicies(s3_client, s3_resource, bucketName, storageBucket):
   # Get the existing policy document
   # Retrieve the policy of the specified bucket
   
   bucketArn = 'arn:aws:s3:::'+bucketName+'/*'
   matchedLogging = False
   matchedSSL = False
+  matchedTLS = False
   updatePolicy = False
   statements = []
   try:
@@ -134,13 +150,11 @@ def updateBucketPolicies(s3_client, s3_resource, bucketName, storageBucket, targ
           matchedSSL = True
       except:
         pass
-
-
     
   except botocore.exceptions.ClientError as error:
     print(error.response['Error']['Code'])
     print('Creating a new policy')
-    policy = json.loads('{ "Id": "SharrNewBucketPolicy", "Version": "2012-10-17","Statement": [{ "Sid": "AllowSSLRequestsOnly","Action": "s3:*","Effect": "Deny","Resource": ["arn:aws:s3:::'+storageBucket+'","arn:aws:s3:::'+storageBucket+'/*" ], "Condition": {"Bool": { "aws:SecureTransport": "false"  } },  "Principal": "*"  }]}')
+    policy = json.loads('{ "Id": "SharrNewBucketPolicy", "Version": "2012-10-17","Statement": []}')
     updatePolicy = True
     statements = []
     
@@ -179,35 +193,39 @@ def updateBucketPolicies(s3_client, s3_resource, bucketName, storageBucket, targ
     
   return
 
-def lambda_handler(event, context):
-  resourceId = event['Resource']['Id']
-  region = event['Finding']['Region']
-  bucketArray = resourceId.split(':')
-  fixmeBucket = bucketArray[-1]
-  AwsAccountId = event['Finding']['AwsAccountId']
+def runbook_handler(event, context):
+  serviceName = 's3'  # default
+  try:
+    bucketName = event['BucketName']
+  except Exception as e:
+    bucketName = ''
+    serviceName = event['logType']
+    pass
+
+  region = event['Region']
+  AwsAccountId = event['AccountId']
   destBucket = 'cnxc-s3-server-access-logging-' + AwsAccountId + '-' + region
-  targetPrefix = fixmeBucket+'/'
-  
-  my_config = Config(
-    region_name = event['Finding']['Region'],
-  )
-  
+  my_config = Config(region_name = region)
   s3_client = boto3.client('s3', config=my_config)
   s3_resource = boto3.resource('s3', config=my_config)
 
-  print(fixmeBucket, destBucket, targetPrefix)
-  if fixmeBucket == destBucket:
-      return {
-        'output':
-          {
-            'message': 'This bucket is exempt from logging as it would create a circular log effect',
-          }
-      }
+  # Create the Logging Bucket
   create_bucket(s3_client, destBucket, region)
-  updateBucketPolicies(s3_client, s3_resource, fixmeBucket, destBucket, targetPrefix)
+
+  # Update the Bucket Policies
+  updateBucketPolicies(s3_client, s3_resource, bucketName, destBucket)
+
   return {
-    'output':
-      {
-        'message': 'Bucket created/updated',
-      }
+        'message': 'Logging bucket created and or verified',
+        'loggingBucketName': destBucket,
+        'status': 'RESOLVED'
   }
+
+if __name__ == "__main__":
+    event = {
+       "BucketName": "needs-s39",
+       "AccountId": "332241576022",
+       "Region": "us-east-1"  
+    }
+    result = runbook_handler(event,"")
+    print(result)

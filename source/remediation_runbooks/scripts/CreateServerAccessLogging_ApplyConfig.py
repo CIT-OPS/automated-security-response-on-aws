@@ -9,49 +9,44 @@ from botocore.exceptions import ClientError
 
 
 def enableAccessLogging(s3, bucketName, storageBucket, targetPrefix):
-  print("Now setting logging on", bucketName)
-  return s3.put_bucket_logging(
-      Bucket=bucketName,
-      BucketLoggingStatus={
-          'LoggingEnabled': {
-              'TargetBucket': storageBucket,
-              'TargetPrefix': targetPrefix
-          }
-      }
-  )
+  print(f"Now setting logging on {bucketName} --> {storageBucket}/{targetPrefix}")
 
-def lambda_handler(event, context):
+def runbook_handler(event, context):
   s3_client = boto3.client('s3')
-  s3 = boto3.resource('s3')
-  resourceId = event['Resource']['Id']
-  region = event['Resource']['Region']
-  bucketArray = resourceId.split(':')
-  fixmeBucket = bucketArray[-1]
-  AwsAccountId = event['Finding']['AwsAccountId']
-  destBucket = 'cnxc-s3-server-access-logging-' + AwsAccountId + '-' + region
-  targetPrefix = fixmeBucket+'/'
+  bucketName = event['BucketName']
+  destBucket = event['LoggingBucketName']
+  targetPrefix = 'access_logs/s3/'+bucketName+'/'
   
-  print(fixmeBucket, destBucket, targetPrefix)
-  if fixmeBucket == destBucket:
+  if bucketName == destBucket:
       return {
         'output':
           {
             'message': 'This bucket is exempt from logging as it would create a circular log effect',
-            'resourceBucketName': fixmeBucket,
+            'resourceBucketName': bucketName,
             'LoggingBucketName': destBucket,
             'LoggingPrefix': targetPrefix,
             'status': 'SUPPRESSED'
           }
       }
 
-  output = enableAccessLogging(s3_client, fixmeBucket, destBucket, targetPrefix)
+  output = enableAccessLogging(s3_client, bucketName, destBucket, targetPrefix)
   return {
     'output':
       {
         'message': 'Server Access Logging Successfully Set.',
-        'resourceBucketName': fixmeBucket,
+        'resourceBucketName': bucketName,
         'LoggingBucketName': destBucket,
         'LoggingPrefix': targetPrefix,
         'status': 'RESOLVED'
       }
   }
+
+# if __name__ == "__main__":
+#     event = {
+#         "AutomationAssumeRole": 'arn:aws:iam::194039877044:role/StupidFingSubstitution',
+#         "BucketName": 'cnxc-inventory',
+#         "loggingBucketName": 'cnxc-s3-server-access-logging-194039877044-us-east-1',
+#     }
+#     result = lambda_handler(event,"")
+#     print(result)
+    
