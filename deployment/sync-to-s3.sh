@@ -1,7 +1,7 @@
 #!/bin/bash
 # Functions to reduce repetitive code
 # do_cmd will exit if the command has a non-zero return code.
-release='v2.0.1.cnxc.3'
+release='v2.0.1.cnxc.4'
 
 do_cmd () {
     echo "------ EXEC $*"
