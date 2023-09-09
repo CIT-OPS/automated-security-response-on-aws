@@ -341,6 +341,14 @@ exports[`admin stack 1`] = `
 exports[`member stack 1`] = `
 {
   "Conditions": {
+    "ControlRunbooksEnableAPIGateway1Condition448DCE16": {
+      "Fn::Equals": [
+        {
+          "Ref": "ControlRunbooksEnableAPIGateway16E01FC4C",
+        },
+        "Available",
+      ],
+    },
     "ControlRunbooksEnableAutoScaling1ConditionD5DF4981": {
       "Fn::Equals": [
         {
@@ -720,6 +728,15 @@ exports[`member stack 1`] = `
   },
   "Description": "test;",
   "Parameters": {
+    "ControlRunbooksEnableAPIGateway16E01FC4C": {
+      "AllowedValues": [
+        "Available",
+        "NOT Available",
+      ],
+      "Default": "Available",
+      "Description": "Enable/disable availability of remediation for pci-dss version 3.2.1 Control APIGateway.1 in Security Hub Console Custom Actions. If NOT Available the remediation cannot be triggered from the Security Hub console in the Security Hub Admin account.",
+      "Type": "String",
+    },
     "ControlRunbooksEnableAutoScaling1851AF8B0": {
       "AllowedValues": [
         "Available",
@@ -1153,6 +1170,362 @@ exports[`member stack 1`] = `
     },
   },
   "Resources": {
+    "ControlRunbooksAPIGateway1BDFF95FB": {
+      "Condition": "ControlRunbooksEnableAPIGateway1Condition448DCE16",
+      "DependsOn": [
+        "CreateWait0",
+      ],
+      "Properties": {
+        "Content": {
+          "assumeRole": "{{ AutomationAssumeRole }}",
+          "description": "### Document Name - ASR-AFSBP_1.0.0_APIGateway.1
+
+## What does this document do?
+ This document checks whether the stage of an Amazon API Gateway REST and WebSocket APIs have logging enabled. The control will remediate if logging is not enabled for all methods of a stage or if loggingLevel is neither ERROR nor INFO.  It will also look for and set X-Ray tracing.
+
+## Input Parameters  FIXME
+* Finding: (Required) Security Hub finding details JSON
+* AutomationAssumeRole: (Required) The ARN of the role that allows Automation to perform the actions on your behalf.
+
+## Output Parameters
+* Remediation.Output
+
+## Documentation Links
+* [AFSBP APIGateway.1](https://docs.aws.amazon.com/securityhub/latest/userguide/apigateway-controls.html#apigateway-1)
+",
+          "mainSteps": [
+            {
+              "action": "aws:executeScript",
+              "inputs": {
+                "Handler": "parse_event",
+                "InputPayload": {
+                  "Finding": "{{ Finding }}",
+                  "expected_control_id": [
+                    "APIGateway.1",
+                  ],
+                  "parse_id_pattern": "(.*)$",
+                },
+                "Runtime": "python3.8",
+                "Script": "# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+import re
+import json
+import boto3
+from botocore.config import Config
+
+def connect_to_config(boto_config):
+    return boto3.client('config', config=boto_config)
+
+def connect_to_ssm(boto_config):
+    return boto3.client('ssm', config=boto_config)
+
+def get_solution_id():
+    return 'SO0111'
+
+def get_solution_version():
+    ssm = connect_to_ssm(
+        Config(
+            retries = {
+                'mode': 'standard'
+            },
+            user_agent_extra = f'AwsSolution/{get_solution_id()}/unknown'
+        )
+    )
+    solution_version = 'unknown'
+    try:
+        ssm_parm_value = ssm.get_parameter(
+            Name=f'/Solutions/{get_solution_id()}/member-version'
+        )['Parameter'].get('Value', 'unknown')
+        solution_version = ssm_parm_value
+    except Exception as e:
+        print(e)
+        print(f'ERROR getting solution version')
+    return solution_version
+
+def get_shortname(long_name):
+    short_name = {
+        'aws-foundational-security-best-practices': 'AFSBP',
+        'cis-aws-foundations-benchmark': 'CIS',
+        'pci-dss': 'PCI',
+        'security-control': 'SC'
+    }
+    return short_name.get(long_name, None)
+
+def get_config_rule(rule_name):
+    boto_config = Config(
+        retries = {
+            'mode': 'standard'
+        },
+        user_agent_extra = f'AwsSolution/{get_solution_id()}/{get_solution_version()}'
+    )
+    config_rule = None
+    try:
+        configsvc = connect_to_config(boto_config)
+        config_rule = configsvc.describe_config_rules(
+            ConfigRuleNames=[ rule_name ]
+        ).get('ConfigRules', [])[0]
+    except Exception as e:
+        print(e)
+        exit(f'ERROR getting config rule {rule_name}')
+    return config_rule
+
+class FindingEvent:
+    """
+    Finding object returns the parse fields from an input finding json object
+    """
+    def _get_resource_id(self, parse_id_pattern, resource_index):
+        identifier_raw = self.finding_json['Resources'][0]['Id']
+        self.resource_id = identifier_raw
+        self.resource_id_matches = []
+
+        if parse_id_pattern:
+            identifier_match = re.match(
+                parse_id_pattern,
+                identifier_raw
+            )
+
+            if identifier_match:
+                for group in range(1, len(identifier_match.groups())+1):
+                    self.resource_id_matches.append(identifier_match.group(group))
+                self.resource_id = identifier_match.group(resource_index)
+            else:
+                exit(f'ERROR: Invalid resource Id {identifier_raw}')
+    
+    def _get_sc_check(self):
+        match_finding_id = re.match(
+            r'^arn:(?:aws|aws-cn|aws-us-gov):securityhub:(?:[a-z]{2}(?:-gov)?-[a-z]+-\\d):\\d{12}:'+
+            'security-control/(.*)/finding/(?i:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$',
+            self.finding_json['Id']
+        )
+        if match_finding_id:
+            self.standard_id = get_shortname('security-control')
+            self.control_id = match_finding_id.group(1)
+
+        return match_finding_id
+
+    def _get_standard_info(self):
+        match_finding_id = re.match(
+            r'^arn:(?:aws|aws-cn|aws-us-gov):securityhub:(?:[a-z]{2}(?:-gov)?-[a-z]+-\\d):\\d{12}:'+
+            'subscription/(.*?)/v/(\\d+\\.\\d+\\.\\d+)/(.*)/finding/(?i:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$',
+            self.finding_json['Id']
+        )
+        if match_finding_id:
+            self.standard_id = get_shortname(match_finding_id.group(1))
+            self.standard_version = match_finding_id.group(2)
+            self.control_id = match_finding_id.group(3)
+        else:
+            match_sc_finding_id = self._get_sc_check()
+            if not match_sc_finding_id:
+                self.valid_finding = False
+                self.invalid_finding_reason = f'Finding Id is invalid: {self.finding_json["Id"]}'
+
+    def _get_aws_config_rule(self):
+        # config_rule_id refers to the AWS Config Rule that produced the finding
+        if "RelatedAWSResources:0/type" in self.finding_json['ProductFields'] and self.finding_json['ProductFields']['RelatedAWSResources:0/type'] == 'AWS::Config::ConfigRule':
+            self.aws_config_rule_id = self.finding_json['ProductFields']['RelatedAWSResources:0/name']
+            self.aws_config_rule = get_config_rule(self.aws_config_rule_id)
+
+    def _get_region_from_resource_id(self):
+        check_for_region = re.match(
+            r'^arn:(?:aws|aws-cn|aws-us-gov):[a-zA-Z0-9]+:([a-z]{2}(?:-gov)?-[a-z]+-\\d):.*:.*$',
+            self.finding_json['Resources'][0]['Id']
+        )
+        if check_for_region:
+            self.resource_region = check_for_region.group(1)
+
+    def __init__(self, finding_json, parse_id_pattern, expected_control_id, resource_index):
+        self.valid_finding = True
+        self.resource_region = None
+        self.control_id = None
+        self.aws_config_rule_id = None
+        self.aws_config_rule = {}
+
+        """Populate fields"""
+        # v1.5
+        self.finding_json = finding_json
+        self._get_resource_id(parse_id_pattern, resource_index)     # self.resource_id, self.resource_id_matches
+        self._get_standard_info()                                   # self.standard_id, self.standard_version, self.control_id
+
+        # V1.4
+        self.account_id = self.finding_json.get('AwsAccountId', None)    # deprecate - get Finding.AwsAccountId
+        if not re.match(r'^\\d{12}$', self.account_id) and self.valid_finding:
+            self.valid_finding = False
+            self.invalid_finding_reason = f'AwsAccountId is invalid: {self.account_id}'
+        self.finding_id = self.finding_json.get('Id', None)              # deprecate
+        self.product_arn = self.finding_json.get('ProductArn', None)
+        if not re.match(r'^arn:(?:aws|aws-cn|aws-us-gov):securityhub:[a-z]{2}(?:-gov)?-[a-z]+-\\d::product/aws/securityhub$', self.product_arn):
+            if self.valid_finding:
+                self.valid_finding = False
+                self.invalid_finding_reason = f'ProductArn is invalid: {self.product_arn}'
+        self.details = self.finding_json['Resources'][0].get('Details', {})
+        # Test mode is used with fabricated finding data to tell the
+        # remediation runbook to run in test more (where supported)
+        # Currently not widely-used and perhaps should be deprecated.
+        self.testmode = bool('testmode' in self.finding_json)
+        self.resource = self.finding_json['Resources'][0]
+        self._get_region_from_resource_id()
+        self._get_aws_config_rule()
+        self.affected_object = {'Type': self.resource['Type'], 'Id': self.resource_id, 'OutputKey': 'Remediation.Output'}
+
+        # Validate control_id
+        if not self.control_id:
+            if self.valid_finding:
+                self.valid_finding = False
+                self.invalid_finding_reason = f'Finding Id is invalid: {self.finding_json["Id"]} - missing Control Id'
+        elif self.control_id not in expected_control_id:  # ControlId is the expected value
+            if self.valid_finding:
+                self.valid_finding = False
+                self.invalid_finding_reason = f'Control Id from input ({self.control_id}) does not match {str(expected_control_id)}'
+
+        if not self.resource_id and self.valid_finding:
+            self.valid_finding = False
+            self.invalid_finding_reason = 'Resource Id is missing from the finding json Resources (Id)'
+
+        if not self.valid_finding:
+            # Error message and return error data
+            msg = f'ERROR: {self.invalid_finding_reason}'
+            exit(msg)
+
+    def __str__(self):
+        return json.dumps(self.__dict__)
+
+'''
+MAIN
+'''
+def parse_event(event, _):
+    finding_event = FindingEvent(event['Finding'], event['parse_id_pattern'], event['expected_control_id'], event.get('resource_index', 1))
+
+    if not finding_event.valid_finding:
+        exit('ERROR: Finding is not valid')
+
+    return {
+        "account_id": finding_event.account_id,
+        "resource_id": finding_event.resource_id,
+        "finding_id": finding_event.finding_id,         # Deprecate v1.5.0+
+        "control_id": finding_event.control_id,
+        "product_arn": finding_event.product_arn,       # Deprecate v1.5.0+
+        "object": finding_event.affected_object,
+        "matches": finding_event.resource_id_matches,
+        "details": finding_event.details,               # Deprecate v1.5.0+
+        "testmode": finding_event.testmode,             # Deprecate v1.5.0+
+        "resource": finding_event.resource,
+        "resource_region": finding_event.resource_region,
+        "finding": finding_event.finding_json,
+        "aws_config_rule": finding_event.aws_config_rule
+    }
+",
+              },
+              "name": "ParseInput",
+              "outputs": [
+                {
+                  "Name": "FindingId",
+                  "Selector": "$.Payload.finding_id",
+                  "Type": "String",
+                },
+                {
+                  "Name": "ProductArn",
+                  "Selector": "$.Payload.product_arn",
+                  "Type": "String",
+                },
+                {
+                  "Name": "AffectedObject",
+                  "Selector": "$.Payload.object",
+                  "Type": "StringMap",
+                },
+                {
+                  "Name": "ResourceId",
+                  "Selector": "$.Payload.resource_id",
+                  "Type": "String",
+                },
+                {
+                  "Name": "Region",
+                  "Selector": "$.Payload.resource.Region",
+                  "Type": "String",
+                },
+                {
+                  "Name": "AccountId",
+                  "Selector": "$.Payload.account_id",
+                  "Type": "String",
+                },
+                {
+                  "Name": "ResourceType",
+                  "Selector": "$.Payload.object.Type",
+                  "Type": "String",
+                },
+              ],
+            },
+            {
+              "action": "aws:executeAutomation",
+              "inputs": {
+                "DocumentName": "ASR-EnableAPIGatewayLogging",
+                "RuntimeParameters": {
+                  "AccountId": "{{ ParseInput.AccountId }}",
+                  "AutomationAssumeRole": "arn:{{ global:AWS_PARTITION }}:iam::{{ global:ACCOUNT_ID }}:role/{{ RemediationRoleName }}",
+                  "Region": "{{ ParseInput.Region }}",
+                  "ResourceId": "{{ ParseInput.ResourceId }}",
+                  "ResourceType": "{{ ParseInput.ResourceType }}",
+                },
+              },
+              "name": "Remediation",
+            },
+            {
+              "action": "aws:executeAwsApi",
+              "inputs": {
+                "Api": "BatchUpdateFindings",
+                "FindingIdentifiers": [
+                  {
+                    "Id": "{{ ParseInput.FindingId }}",
+                    "ProductArn": "{{ ParseInput.ProductArn }}",
+                  },
+                ],
+                "Note": {
+                  "Text": "Enabled API Gateway execution logging",
+                  "UpdatedBy": "ASR-PCI_3.2.1_APIGateway.1",
+                },
+                "Service": "securityhub",
+                "Workflow": {
+                  "Status": "RESOLVED",
+                },
+              },
+              "isEnd": true,
+              "name": "UpdateFinding",
+            },
+          ],
+          "outputs": [
+            "Remediation.Output",
+            "ParseInput.AffectedObject",
+          ],
+          "parameters": {
+            "AutomationAssumeRole": {
+              "allowedPattern": "^arn:(?:aws|aws-us-gov|aws-cn):iam::\\d{12}:role\\/[\\w+=,.@-]+$",
+              "description": "(Required) The ARN of the role that allows Automation to perform the actions on your behalf.",
+              "type": "String",
+            },
+            "Finding": {
+              "description": "The input from the Orchestrator Step function for the APIGateway.1 finding",
+              "type": "StringMap",
+            },
+            "RemediationRoleName": {
+              "allowedPattern": "^[\\w+=,.@-]+$",
+              "default": "SO0111-EnableAPIGatewayLogging",
+              "type": "String",
+            },
+          },
+          "schemaVersion": "0.3",
+        },
+        "DocumentFormat": "YAML",
+        "DocumentType": "Automation",
+        "Name": "ASR-PCI_3.2.1_APIGateway.1",
+        "Tags": [
+          {
+            "Key": "CdkGenerated",
+            "Value": "true",
+          },
+        ],
+        "UpdateMethod": "NewVersion",
+      },
+      "Type": "AWS::SSM::Document",
+    },
     "ControlRunbooksAutoScaling1BA109277": {
       "Condition": "ControlRunbooksEnableAutoScaling1ConditionD5DF4981",
       "DependsOn": [
@@ -2554,7 +2927,7 @@ def parse_event(event, _):
     "ControlRunbooksCloudTrail4057F669F": {
       "Condition": "ControlRunbooksEnableCloudTrail4Condition587734A2",
       "DependsOn": [
-        "CreateWait0",
+        "CreateWait1",
       ],
       "Properties": {
         "Content": {
@@ -4642,7 +5015,7 @@ def verify(event, _):
     "ControlRunbooksCodeBuild2A2751671": {
       "Condition": "ControlRunbooksEnableCodeBuild2ConditionB01F473D",
       "DependsOn": [
-        "CreateWait1",
+        "CreateWait2",
       ],
       "Properties": {
         "Content": {
@@ -5615,8 +5988,6 @@ def parse_event(event, _):
                 "DocumentName": "ASR-EnableDynamoDB_PITR",
                 "RuntimeParameters": {
                   "AutomationAssumeRole": "arn:{{ global:AWS_PARTITION }}:iam::{{ global:ACCOUNT_ID }}:role/{{ RemediationRoleName }}",
-                  "DDBTableArn": "{{ ParseInput.TableArn }}",
-                  "DDBTableRegion": "{{ ParseInput.TableRegion }}",
                   "TableArn": "{{ ParseInput.TableArn }}",
                 },
               },
@@ -7093,7 +7464,7 @@ def parse_event(event, _):
     "ControlRunbooksEC267E3087AE": {
       "Condition": "ControlRunbooksEnableEC26ConditionF1F880B0",
       "DependsOn": [
-        "CreateWait2",
+        "CreateWait3",
       ],
       "Properties": {
         "Content": {
@@ -8805,7 +9176,7 @@ def parse_event(event, _):
     "ControlRunbooksIAM70A808F7C": {
       "Condition": "ControlRunbooksEnableIAM7ConditionDF8E776B",
       "DependsOn": [
-        "CreateWait3",
+        "CreateWait4",
       ],
       "Properties": {
         "Content": {
@@ -9856,7 +10227,7 @@ def parse_event(event, _):
     "ControlRunbooksLambda1F6ECACF8": {
       "Condition": "ControlRunbooksEnableLambda1Condition077CECAF",
       "DependsOn": [
-        "CreateWait4",
+        "CreateWait5",
       ],
       "Properties": {
         "Content": {
@@ -12390,7 +12761,7 @@ def parse_event(event, _):
     "ControlRunbooksRDS6082B0D6B": {
       "Condition": "ControlRunbooksEnableRDS6Condition4A60A39B",
       "DependsOn": [
-        "CreateWait5",
+        "CreateWait6",
       ],
       "Properties": {
         "Content": {
@@ -13484,7 +13855,7 @@ def parse_event(event, _):
     "ControlRunbooksRedshift1789871EB": {
       "Condition": "ControlRunbooksEnableRedshift1Condition3449D560",
       "DependsOn": [
-        "CreateWait6",
+        "CreateWait7",
       ],
       "Properties": {
         "Content": {
@@ -15440,7 +15811,7 @@ def parse_event(event, _):
     "ControlRunbooksS3260D6E897": {
       "Condition": "ControlRunbooksEnableS32ConditionD6F8CCE9",
       "DependsOn": [
-        "CreateWait7",
+        "CreateWait8",
       ],
       "Properties": {
         "Content": {
@@ -17940,7 +18311,7 @@ def parse_event(event, _):
     "ControlRunbooksSQS173AA7C81": {
       "Condition": "ControlRunbooksEnableSQS1Condition3065B4F2",
       "DependsOn": [
-        "CreateWait8",
+        "CreateWait9",
       ],
       "Properties": {
         "Content": {
@@ -18308,7 +18679,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "11dc0ae816812ef227e9a7bd3a337d46b3b7c94d23b76ecdc435757c227797ff",
+        "DocumentPropertiesHash": "009e1b1815ef93867eddbbdf72b032445493a454a909734b877948935b052191",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18325,7 +18696,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "53f801b967c642ca21ddb9491ddf4a80c610bd2342d34f42ac499e3ce5cc710b",
+        "DocumentPropertiesHash": "de755fc7ecbed5ce65ca4e20d3d4d4fa6e198da5490943001c5160bfd95f3b51",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18342,7 +18713,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "f43773c0130d30764cf98b722022d6b084a806e557607fffe7abf45cdcf5eac5",
+        "DocumentPropertiesHash": "fa8efc9118c117dfcda3b6f07d91ff7660204ce2e2e387157001a29e0cf40360",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18359,7 +18730,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "ebd343d9d4004bb9b26aef6b8cad887ab4641f5c4d5345f41716d8272f8cafad",
+        "DocumentPropertiesHash": "0b47a1b93d4be48c0db2ab6c2cd69fe51d89056339e54006d2cb00457885870a",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18376,7 +18747,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "68c2bf19edd4ba2431797cf5b2d846763e1434493bed49f963afe8c0b379e0a9",
+        "DocumentPropertiesHash": "055ee7757eb32f5616c12751a59e81eab5a6d5a89b9aaf963c9c449f447c9459",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18393,7 +18764,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "c92a73f53e8dbcdb4612d05f551f06f194ddf9ec760419d0b66cf70c51c14069",
+        "DocumentPropertiesHash": "a2d49e937ade3da1f586a08197aab78bff836b18bf871587d14593160e4d537c",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18410,7 +18781,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "554f8140849eb69ef33620950d9db1255e2d74f3daa602fe480886b03e452ef3",
+        "DocumentPropertiesHash": "b571a4af3a39406a49c04ac5353c4882cb932dea41450d38ff9023fe60982201",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18427,7 +18798,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "8d42b99ea7665203a6af2c07bc9c28d7e48019faac041637e0391790c7301fa6",
+        "DocumentPropertiesHash": "0f1520cac4f77556d1ddd4d4a77bcc4cad4d6945895a873fee9b50cbb60bdd82",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18444,7 +18815,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "b69f1d7ee46c5d846c1df51c68ba5b8ccf9b8f9fb2a28b854512456e45124736",
+        "DocumentPropertiesHash": "d437fd385644a64acddb20edaa1f907f285cbc5f7232317e17400a40dbb0d443",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18461,7 +18832,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "0192d1de8a019b34bc9e4383ef835b8d55be7681ea1faade6d9ba001cc1cb8a3",
+        "DocumentPropertiesHash": "1ddaa66543b6d561222bf40a61c1131852c184293363c6e11181a2f4ae6afb21",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18478,7 +18849,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "11dc0ae816812ef227e9a7bd3a337d46b3b7c94d23b76ecdc435757c227797ff",
+        "DocumentPropertiesHash": "009e1b1815ef93867eddbbdf72b032445493a454a909734b877948935b052191",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18496,7 +18867,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "53f801b967c642ca21ddb9491ddf4a80c610bd2342d34f42ac499e3ce5cc710b",
+        "DocumentPropertiesHash": "de755fc7ecbed5ce65ca4e20d3d4d4fa6e198da5490943001c5160bfd95f3b51",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18514,7 +18885,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "f43773c0130d30764cf98b722022d6b084a806e557607fffe7abf45cdcf5eac5",
+        "DocumentPropertiesHash": "fa8efc9118c117dfcda3b6f07d91ff7660204ce2e2e387157001a29e0cf40360",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18532,7 +18903,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "ebd343d9d4004bb9b26aef6b8cad887ab4641f5c4d5345f41716d8272f8cafad",
+        "DocumentPropertiesHash": "0b47a1b93d4be48c0db2ab6c2cd69fe51d89056339e54006d2cb00457885870a",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18550,7 +18921,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "68c2bf19edd4ba2431797cf5b2d846763e1434493bed49f963afe8c0b379e0a9",
+        "DocumentPropertiesHash": "055ee7757eb32f5616c12751a59e81eab5a6d5a89b9aaf963c9c449f447c9459",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18568,7 +18939,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "c92a73f53e8dbcdb4612d05f551f06f194ddf9ec760419d0b66cf70c51c14069",
+        "DocumentPropertiesHash": "a2d49e937ade3da1f586a08197aab78bff836b18bf871587d14593160e4d537c",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18586,7 +18957,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "554f8140849eb69ef33620950d9db1255e2d74f3daa602fe480886b03e452ef3",
+        "DocumentPropertiesHash": "b571a4af3a39406a49c04ac5353c4882cb932dea41450d38ff9023fe60982201",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18604,7 +18975,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "8d42b99ea7665203a6af2c07bc9c28d7e48019faac041637e0391790c7301fa6",
+        "DocumentPropertiesHash": "0f1520cac4f77556d1ddd4d4a77bcc4cad4d6945895a873fee9b50cbb60bdd82",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18622,7 +18993,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "b69f1d7ee46c5d846c1df51c68ba5b8ccf9b8f9fb2a28b854512456e45124736",
+        "DocumentPropertiesHash": "d437fd385644a64acddb20edaa1f907f285cbc5f7232317e17400a40dbb0d443",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18640,7 +19011,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "0192d1de8a019b34bc9e4383ef835b8d55be7681ea1faade6d9ba001cc1cb8a3",
+        "DocumentPropertiesHash": "1ddaa66543b6d561222bf40a61c1131852c184293363c6e11181a2f4ae6afb21",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -18651,6 +19022,15 @@ def parse_event(event, _):
     },
     "Gate0": {
       "Metadata": {
+        "ControlRunbooksAPIGateway1BDFF95FBReady": {
+          "Fn::If": [
+            "ControlRunbooksEnableAPIGateway1Condition448DCE16",
+            {
+              "Ref": "ControlRunbooksAPIGateway1BDFF95FB",
+            },
+            "",
+          ],
+        },
         "ControlRunbooksAutoScaling1BA109277Ready": {
           "Fn::If": [
             "ControlRunbooksEnableAutoScaling1ConditionD5DF4981",
@@ -18687,6 +19067,11 @@ def parse_event(event, _):
             "",
           ],
         },
+      },
+      "Type": "AWS::CloudFormation::WaitConditionHandle",
+    },
+    "Gate1": {
+      "Metadata": {
         "ControlRunbooksCloudTrail4057F669FReady": {
           "Fn::If": [
             "ControlRunbooksEnableCloudTrail4Condition587734A2",
@@ -18696,11 +19081,6 @@ def parse_event(event, _):
             "",
           ],
         },
-      },
-      "Type": "AWS::CloudFormation::WaitConditionHandle",
-    },
-    "Gate1": {
-      "Metadata": {
         "ControlRunbooksCloudTrail54F5ED8E4Ready": {
           "Fn::If": [
             "ControlRunbooksEnableCloudTrail5Condition17B6B536",
@@ -18737,6 +19117,11 @@ def parse_event(event, _):
             "",
           ],
         },
+      },
+      "Type": "AWS::CloudFormation::WaitConditionHandle",
+    },
+    "Gate2": {
+      "Metadata": {
         "ControlRunbooksCodeBuild2A2751671Ready": {
           "Fn::If": [
             "ControlRunbooksEnableCodeBuild2ConditionB01F473D",
@@ -18746,11 +19131,6 @@ def parse_event(event, _):
             "",
           ],
         },
-      },
-      "Type": "AWS::CloudFormation::WaitConditionHandle",
-    },
-    "Gate2": {
-      "Metadata": {
         "ControlRunbooksConfig1512B566FReady": {
           "Fn::If": [
             "ControlRunbooksEnableConfig1Condition8CEB8627",
@@ -18787,15 +19167,6 @@ def parse_event(event, _):
             "",
           ],
         },
-        "ControlRunbooksEC267E3087AEReady": {
-          "Fn::If": [
-            "ControlRunbooksEnableEC26ConditionF1F880B0",
-            {
-              "Ref": "ControlRunbooksEC267E3087AE",
-            },
-            "",
-          ],
-        },
       },
       "Type": "AWS::CloudFormation::WaitConditionHandle",
     },
@@ -18819,6 +19190,15 @@ def parse_event(event, _):
             "",
           ],
         },
+        "ControlRunbooksEC267E3087AEReady": {
+          "Fn::If": [
+            "ControlRunbooksEnableEC26ConditionF1F880B0",
+            {
+              "Ref": "ControlRunbooksEC267E3087AE",
+            },
+            "",
+          ],
+        },
         "ControlRunbooksEC277719A4CDReady": {
           "Fn::If": [
             "ControlRunbooksEnableEC27ConditionC77CF056",
@@ -18833,15 +19213,6 @@ def parse_event(event, _):
             "ControlRunbooksEnableIAM3Condition3AA0E892",
             {
               "Ref": "ControlRunbooksIAM3DC25477E",
-            },
-            "",
-          ],
-        },
-        "ControlRunbooksIAM70A808F7CReady": {
-          "Fn::If": [
-            "ControlRunbooksEnableIAM7ConditionDF8E776B",
-            {
-              "Ref": "ControlRunbooksIAM70A808F7C",
             },
             "",
           ],
@@ -18869,6 +19240,15 @@ def parse_event(event, _):
             "",
           ],
         },
+        "ControlRunbooksIAM70A808F7CReady": {
+          "Fn::If": [
+            "ControlRunbooksEnableIAM7ConditionDF8E776B",
+            {
+              "Ref": "ControlRunbooksIAM70A808F7C",
+            },
+            "",
+          ],
+        },
         "ControlRunbooksIAM8632E03EDReady": {
           "Fn::If": [
             "ControlRunbooksEnableIAM8Condition9CA5CB4B",
@@ -18887,6 +19267,11 @@ def parse_event(event, _):
             "",
           ],
         },
+      },
+      "Type": "AWS::CloudFormation::WaitConditionHandle",
+    },
+    "Gate5": {
+      "Metadata": {
         "ControlRunbooksLambda1F6ECACF8Ready": {
           "Fn::If": [
             "ControlRunbooksEnableLambda1Condition077CECAF",
@@ -18896,11 +19281,6 @@ def parse_event(event, _):
             "",
           ],
         },
-      },
-      "Type": "AWS::CloudFormation::WaitConditionHandle",
-    },
-    "Gate5": {
-      "Metadata": {
         "ControlRunbooksRDS1D73701E9Ready": {
           "Fn::If": [
             "ControlRunbooksEnableRDS1ConditionFAE5B7EA",
@@ -18937,15 +19317,6 @@ def parse_event(event, _):
             "",
           ],
         },
-        "ControlRunbooksRDS6082B0D6BReady": {
-          "Fn::If": [
-            "ControlRunbooksEnableRDS6Condition4A60A39B",
-            {
-              "Ref": "ControlRunbooksRDS6082B0D6B",
-            },
-            "",
-          ],
-        },
       },
       "Type": "AWS::CloudFormation::WaitConditionHandle",
     },
@@ -18969,6 +19340,15 @@ def parse_event(event, _):
             "",
           ],
         },
+        "ControlRunbooksRDS6082B0D6BReady": {
+          "Fn::If": [
+            "ControlRunbooksEnableRDS6Condition4A60A39B",
+            {
+              "Ref": "ControlRunbooksRDS6082B0D6B",
+            },
+            "",
+          ],
+        },
         "ControlRunbooksRDS715C0A01AReady": {
           "Fn::If": [
             "ControlRunbooksEnableRDS7ConditionE53509B0",
@@ -18987,6 +19367,11 @@ def parse_event(event, _):
             "",
           ],
         },
+      },
+      "Type": "AWS::CloudFormation::WaitConditionHandle",
+    },
+    "Gate7": {
+      "Metadata": {
         "ControlRunbooksRedshift1789871EBReady": {
           "Fn::If": [
             "ControlRunbooksEnableRedshift1Condition3449D560",
@@ -18996,11 +19381,6 @@ def parse_event(event, _):
             "",
           ],
         },
-      },
-      "Type": "AWS::CloudFormation::WaitConditionHandle",
-    },
-    "Gate7": {
-      "Metadata": {
         "ControlRunbooksRedshift3106C10FFReady": {
           "Fn::If": [
             "ControlRunbooksEnableRedshift3ConditionC65BAEF6",
@@ -19037,6 +19417,11 @@ def parse_event(event, _):
             "",
           ],
         },
+      },
+      "Type": "AWS::CloudFormation::WaitConditionHandle",
+    },
+    "Gate8": {
+      "Metadata": {
         "ControlRunbooksS3260D6E897Ready": {
           "Fn::If": [
             "ControlRunbooksEnableS32ConditionD6F8CCE9",
@@ -19046,11 +19431,6 @@ def parse_event(event, _):
             "",
           ],
         },
-      },
-      "Type": "AWS::CloudFormation::WaitConditionHandle",
-    },
-    "Gate8": {
-      "Metadata": {
         "ControlRunbooksS34F82DA9F1Ready": {
           "Fn::If": [
             "ControlRunbooksEnableS34ConditionC23F6623",
@@ -19087,15 +19467,6 @@ def parse_event(event, _):
             "",
           ],
         },
-        "ControlRunbooksSQS173AA7C81Ready": {
-          "Fn::If": [
-            "ControlRunbooksEnableSQS1Condition3065B4F2",
-            {
-              "Ref": "ControlRunbooksSQS173AA7C81",
-            },
-            "",
-          ],
-        },
       },
       "Type": "AWS::CloudFormation::WaitConditionHandle",
     },
@@ -19115,6 +19486,15 @@ def parse_event(event, _):
             "ControlRunbooksEnableSNS2Condition69621468",
             {
               "Ref": "ControlRunbooksSNS2112179CC",
+            },
+            "",
+          ],
+        },
+        "ControlRunbooksSQS173AA7C81Ready": {
+          "Fn::If": [
+            "ControlRunbooksEnableSQS1Condition3065B4F2",
+            {
+              "Ref": "ControlRunbooksSQS173AA7C81",
             },
             "",
           ],

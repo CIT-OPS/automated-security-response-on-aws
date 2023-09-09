@@ -29,6 +29,9 @@ Aspects.of(app).add(new AwsSolutionsChecks());
 // Security Standard and Control Id. See cis-member-stack
 const remediations: IControl[] = [
   { control: 'AutoScaling.1' },
+  { control: 'APIGateway.1' },                            // CNXC API Gateway REST and WebSocket API execution logging should be enabled
+  { control: 'APIGateway.3', executes: 'APIGateway.1'},   // CNXC API Gateway REST API stages should have AWS X-Ray tracing enabled
+  { control: 'APIGateway.9', executes: 'APIGateway.1' },  // CNXC Access logging should be configured for API Gateway V2 Stages
   { control: 'CloudTrail.1' },
   { control: 'CloudTrail.2' },
   { control: 'CloudTrail.3', executes: 'CloudTrail.1' },
@@ -52,6 +55,7 @@ const remediations: IControl[] = [
   { control: 'CloudWatch.14', executes: 'CloudWatch.1' },
   { control: 'CodeBuild.2' },
   { control: 'Config.1' },
+  { control: 'DynamoDB.2' }, // CNXC DynamoDB tables should have point-in-time recovery enabled
   { control: 'EC2.1' },
   { control: 'EC2.2' },
   { control: 'EC2.6' },
@@ -92,7 +96,7 @@ const remediations: IControl[] = [
   { control: 'S3.5' },
   { control: 'S3.6' },
   { control: 'S3.8', executes: 'S3.2' },
-  { control: 'S3.9' },
+  { control: 'S3.9' },    // CNXC S3 bucket server access logging should be enabled
 ];
 
 const adminStack = new SecurityControlsPlaybookPrimaryStack(app, 'SCStack', {
