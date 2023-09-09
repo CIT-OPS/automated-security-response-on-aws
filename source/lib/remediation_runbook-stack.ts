@@ -1488,6 +1488,66 @@ export class RemediationRunbookStack extends cdk.Stack {
       };
     }
 
+    //-----------------------
+    // EnableAPIGatewayLogging
+    //
+    {
+      const remediationName = 'EnableAPIGatewayLogging';
+      const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
+
+      const remediationPolicy1 = new PolicyStatement();
+      remediationPolicy1.addActions('s3:*');
+      remediationPolicy1.effect = Effect.ALLOW;
+      remediationPolicy1.addResources('*');
+      inlinePolicy.addStatements(remediationPolicy1);
+
+      const remediationPolicy2 = new PolicyStatement();
+      remediationPolicy2.addActions('iam:*');
+      remediationPolicy2.effect = Effect.ALLOW;
+      remediationPolicy2.addResources('*');
+      inlinePolicy.addStatements(remediationPolicy2);
+
+      const remediationPolicy3 = new PolicyStatement();
+      remediationPolicy3.addActions('apigateway:*');
+      remediationPolicy3.effect = Effect.ALLOW;
+      remediationPolicy3.addResources('*');
+      inlinePolicy.addStatements(remediationPolicy3);
+
+      const remediationPolicy4 = new PolicyStatement();
+      remediationPolicy4.addActions('logs:*','cloudwatch:*');
+      remediationPolicy4.effect = Effect.ALLOW;
+      remediationPolicy4.addResources('*');
+      inlinePolicy.addStatements(remediationPolicy4);
+
+      new SsmRole(props.roleStack, 'RemediationRole ' + remediationName, {
+        solutionId: props.solutionId,
+        ssmDocName: remediationName,
+        remediationPolicy: inlinePolicy,
+        remediationRoleName: `${remediationRoleNameBase}${remediationName}`,
+      });
+
+      RunbookFactory.createRemediationRunbook(this, 'ASR ' + remediationName, {
+        ssmDocName: remediationName,
+        ssmDocPath: ssmdocs,
+        ssmDocFileName: `${remediationName}.yaml`,
+        scriptPath: `${ssmdocs}/scripts`,
+        solutionVersion: props.solutionVersion,
+        solutionDistBucket: props.solutionDistBucket,
+        solutionId: props.solutionId,
+      });
+      const childToMod = inlinePolicy.node.findChild('Resource') as CfnPolicy;
+      childToMod.cfnOptions.metadata = {
+        cfn_nag: {
+          rules_to_suppress: [
+            {
+              id: 'W12',
+              reason: 'Resource * is required for to allow remediation for any resource.',
+            },
+          ],
+        },
+      };
+    }
+
     //=========================================================================
     // The following are permissions only for use with AWS-owned documents that
     //   are available to GovCloud and China partition customers.

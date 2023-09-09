@@ -6,6 +6,7 @@ import { ControlRunbookDocument } from '../ssmdocs/control_runbook';
 import { CfnCondition, CfnParameter, Fn } from 'aws-cdk-lib';
 
 import * as autoscaling_1 from '../ssmdocs/SC_AutoScaling.1';
+import * as apigateway_1 from '../ssmdocs/SC_APIGateway.1';   // CNXC
 import * as cloudformation_1 from '../ssmdocs/SC_CloudFormation.1';
 import * as cloudtrail_1 from '../ssmdocs/SC_CloudTrail.1';
 import * as cloudtrail_2 from '../ssmdocs/SC_CloudTrail.2';
@@ -16,7 +17,7 @@ import * as cloudtrail_7 from '../ssmdocs/SC_CloudTrail.7';
 import * as cloudwatch_1 from '../ssmdocs/SC_CloudWatch.1';
 import * as codebuild_2 from '../ssmdocs/SC_CodeBuild.2';
 import * as config_1 from '../ssmdocs/SC_Config.1';
-import * as dynamodb_2 from '../ssmdocs/SC_DynamoDB.2';
+import * as dynamodb_2 from '../ssmdocs/SC_DynamoDB.2'; // CNXC
 import * as ec2_1 from '../ssmdocs/SC_EC2.1';
 import * as ec2_2 from '../ssmdocs/SC_EC2.2';
 import * as ec2_6 from '../ssmdocs/SC_EC2.6';
@@ -48,7 +49,7 @@ import * as s3_2 from '../ssmdocs/SC_S3.2';
 import * as s3_4 from '../ssmdocs/SC_S3.4';
 import * as s3_5 from '../ssmdocs/SC_S3.5';
 import * as s3_6 from '../ssmdocs/SC_S3.6';
-import * as s3_9 from '../ssmdocs/SC_S3.9';
+import * as s3_9 from '../ssmdocs/SC_S3.9'; // CNXC
 import * as sqs_1 from '../ssmdocs/SC_SQS.1';
 import * as sns_1 from '../ssmdocs/SC_SNS.1';
 import * as sns_2 from '../ssmdocs/SC_SNS.2';
@@ -75,6 +76,7 @@ export class ControlRunbooks extends Construct {
     this.standardVersion = props.standardVersion;
 
     this.add(autoscaling_1.createControlRunbook(this, 'AutoScaling.1', props));
+    this.add(apigateway_1.createControlRunbook(this, 'APIGateway.1', props));
     this.add(cloudformation_1.createControlRunbook(this, 'CloudFormation.1', props));
     this.add(cloudtrail_1.createControlRunbook(this, 'CloudTrail.1', props));
     this.add(cloudtrail_2.createControlRunbook(this, 'CloudTrail.2', props));

@@ -1,6 +1,6 @@
 schemaVersion: "0.3"
 description: |
-  ### Document name - ASR-EnableDDBPointInTimeRecovery
+  ### Document name - ASR-EnableDynamoDB_PITR
 
   ## What does this document do?
   Enables Point In Time Recovery on a DynamoDB Table:
@@ -22,7 +22,7 @@ parameters:
   TableArn:
     type: String
     description: The ARN of a DynamoDB table to set PITR on
-    allowedPattern: '(.*)$'
+    allowedPattern: '^[a-zA-Z0-9][a-zA-Z0-9-_:]{0,255}$'
     
 outputs:
   - Remediation.Output

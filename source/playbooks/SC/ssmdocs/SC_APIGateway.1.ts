@@ -13,19 +13,23 @@ import {
 } from '@cdklabs/cdk-ssm-documents';
 
 export function createControlRunbook(scope: Construct, id: string, props: PlaybookProps): ControlRunbookDocument {
-  return new ConfigureS3ServerAccessLoggingDocument(scope, id, { ...props, controlId: 'S3.9' });
+  return new EnableAPIGatewayLoggingDocument(scope, id, { ...props, controlId: 'APIGateway.1' });
 }
 
-class ConfigureS3ServerAccessLoggingDocument extends ControlRunbookDocument {
+class EnableAPIGatewayLoggingDocument extends ControlRunbookDocument {
   constructor(scope: Construct, id: string, props: ControlRunbookProps) {
     super(scope, id, {
       ...props,
-      securityControlId: 'S3.9',
-      remediationName: 'ConfigureS3ServerAccessLogging',
+      securityControlId: 'APIGateway.1',
+      otherControlIds: [
+        'APIGateway.3',
+        'APIGateway.9',
+      ],
+      remediationName: 'EnableAPIGatewayLogging',
       scope: RemediationScope.GLOBAL,
-      resourceIdName: 'BucketName',
-      resourceIdRegex: String.raw`^arn:(?:aws|aws-cn|aws-us-gov):s3:::([A-Za-z0-9.-]{3,63})$`,
-      updateDescription: HardCodedString.of('Configured S3 Server Access Logging'),
+      resourceIdName: 'ResourceId',
+      resourceIdRegex: String.raw`(.*)$`,
+      updateDescription: HardCodedString.of('Enabled API Gateway execution logging'),
       header: 'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',      
     });
   }
@@ -35,31 +39,34 @@ class ConfigureS3ServerAccessLoggingDocument extends ControlRunbookDocument {
     const outputs = super.getParseInputStepOutputs();
 
     outputs.push({
+      name: 'Region',
+      outputType: DataTypeEnum.STRING,
+      selector: '$.Payload.resource.Region',
+    });
+
+    outputs.push({
       name: 'AccountId',
       outputType: DataTypeEnum.STRING,
       selector: '$.Payload.account_id',
     });
 
     outputs.push({
-      name: 'Region',
+      name: 'ResourceType',
       outputType: DataTypeEnum.STRING,
-      selector: '$.Payload.resource.Region',
+      selector: '$.Payload.object.Type',
     });
 
     return outputs;
   }
-
-
 
   /** @override */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   protected getRemediationParams(): { [_: string]: any } {
     const params = super.getRemediationParams();
 
-    params.BucketName = StringVariable.of('ParseInput.BucketName');
     params.Region = StringVariable.of('ParseInput.Region');
     params.AccountId = StringVariable.of('ParseInput.AccountId');
-
+    params.ResourceType = StringVariable.of('ParseInput.ResourceType');
     return params;
   }
 
