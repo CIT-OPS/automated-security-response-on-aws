@@ -2554,7 +2554,7 @@ Confirms the public accessibility setting is disabled on the cluster.
     },
     "ASRDisablePublicIPAutoAssign": {
       "DependsOn": [
-        "CreateWait8",
+        "CreateWait9",
       ],
       "Properties": {
         "Content": {
@@ -2985,12 +2985,104 @@ def runbook_handler(event, context):
             'status': 'ERROR'
         }
 
+  if ResourceType == "AwsCloudFrontDistribution":
+        DEBUG = False
+        
+        distributionSplit = ResourceSplit[5].split('/')
+        distributionId = distributionSplit[1]
+
+        # Get the current Distribution Config
+        # To update a web distribution using the CloudFront API
+        #   Use GetDistributionConfig to get the current configuration, including the version identifier ( ETag).
+        #   Update the distribution configuration that was returned in the response. Note the following important requirements and restrictions:
+        #   You must rename the ETag field to IfMatch, leaving the value unchanged. (Set the value of IfMatch to the value of ETag, then remove the ETag field.)
+        #   You can’t change the value of CallerReference.
+        #   Submit an UpdateDistribution request, providing the distribution configuration. The new configuration replaces the existing configuration. The values that you specify in an UpdateDistribution request are not merged into your existing configuration. Make sure to include all fields: the ones that you modified and also the ones that you didn’t.
+
+        # Permissions required:  
+        # remediationPolicy2.addActions('cloudfront:GetDistribution*', 'cloudfront:UpdateDistribution');
+
+        cloudfrontClient = boto3.client('cloudfront')
+        response = cloudfrontClient.get_distribution(Id=distributionId)
+        print(f"Distribution {distributionId} currently has a status of {response['Distribution']['Status']}")
+        if response['Distribution']['Status'] != "Deployed":
+            exit("cannot update cloudfront config when its status is {response['Distribution']['Status']}")
+
+        print(f"Getting current distribution config for {distributionId}")
+        distroConfig = response = cloudfrontClient.get_distribution_config(Id=distributionId)
+        ETag = distroConfig["ETag"]
+        distroConfig.pop("ETag")                # Get rid of this.  Actually change it to IfMatch 
+        distroConfig.pop("ResponseMetadata")    # No use for this info, and not to be passed back
+        distroConfig["IfMatch"] = ETag
+        #printObject = printJson(distroConfig) if DEBUG is True else None
+        
+        updateDefaultRoot = True
+        if 'DefaultRootObject' in distroConfig['DistributionConfig']:
+            if distroConfig['DistributionConfig']['DefaultRootObject'] != "":
+                updateDefaultRoot = False
+
+        if updateDefaultRoot:
+            distroConfig['DistributionConfig']['DefaultRootObject'] = "index.html"
+            print(f"Updating DefaultRootObject from None to 'index.html' because security hub thinks its a necessary security precaution.")
+        else:
+            print(f"DefaultRootObject remains as {distroConfig['DistributionConfig']['DefaultRootObject']}")
+
+        ViewerProtocolPolicy = distroConfig['DistributionConfig']['DefaultCacheBehavior']['ViewerProtocolPolicy']
+        if ViewerProtocolPolicy == 'allow-all':
+            print(f"Updating ViewerProtocolPolicy from 'allow-all' to 'redirect-to-https' for better 'security'")
+            distroConfig['DistributionConfig']['DefaultCacheBehavior']['ViewerProtocolPolicy'] = 'redirect-to-https'
+        else:
+            print(f"ViewerProtocolPolicy of '{ViewerProtocolPolicy}' meets security requirement for https")
+
+        # Using SNI?
+        if distroConfig['DistributionConfig']['Aliases']['Quantity'] > 0:
+            SSLSupportMethod = distroConfig['DistributionConfig']['ViewerCertificate']['SSLSupportMethod']
+            MinimumProtocolVersion = distroConfig['DistributionConfig']['ViewerCertificate']['MinimumProtocolVersion']
+            DesiredProtocolVersion = 'TLSv1.2_2021'
+            if SSLSupportMethod != "sni-only":
+                print(f"[ERROR] CLOUDFRONT CONFIGURED WITH A NON STANDARD EXPENSIVE OPTION  (SSLSupportMethod={SSLSupportMethod})")
+            if MinimumProtocolVersion != DesiredProtocolVersion:
+                print(f"Updating Cloudfront viewer certificate, minimum security protocol requirement from {MinimumProtocolVersion} to {DesiredProtocolVersion}")
+                distroConfig['DistributionConfig']['ViewerCertificate']['MinimumProtocolVersion'] = DesiredProtocolVersion
+        else:
+            print(f"WARNING - You are not supposed to use the default domain name;  Please update to use a custom domain name (SNI)")
+
+        # http version http/2 and http/3
+        if distroConfig['DistributionConfig']['HttpVersion'] != "http2and3":
+            print("Updating maximum viewer configuration to allow up to HTTP/3 with TLS 1.3")
+            distroConfig['DistributionConfig']['HttpVersion'] = "http2and3"
+
+        if distroConfig['DistributionConfig']['Comment'] == "":
+            distroConfig['DistributionConfig']['Comment'] = "FIXME - You should really have a description for what this cloudfront does!"
+
+        if distroConfig['DistributionConfig']['Logging']['Enabled'] == False:
+            distroConfig['DistributionConfig']['Logging']['Enabled'] = True
+            distroConfig['DistributionConfig']['Logging']['IncludeCookies'] = True
+            distroConfig['DistributionConfig']['Logging']['Bucket'] = event['LoggingBucket']+'.s3.amazonaws.com'
+            distroConfig['DistributionConfig']['Logging']['Prefix'] = AwsAccountId+"/"
+            print(f"Set logging to bucket to {event['LoggingBucket']}")
+
+        if 'Id' not in distroConfig:
+            distroConfig['Id'] = distributionId
+
+
+        printObject = printJson(distroConfig) if DEBUG is True else None
+        
+        response = cloudfrontClient.update_distribution(**distroConfig)
+        return {
+            'message': 'Cloudfront logging and other defaults set',
+            'status': 'RESOLVED'
+        }
 
   return {
         'message': 'UNKNOWN Service requested for logging - IGNORED',
         'status': 'ERROR'
   }
 
+def printJson(object):
+    json_formatted_str = json.dumps(object, indent=2)
+    print(json_formatted_str)
+    return
 
 def setupAPIGatewayAccountSettings(AwsAccountId, apigwclient):
     response = apigwclient.get_account()
@@ -3042,6 +3134,7 @@ def setupAPIGatewayAccountSettings(AwsAccountId, apigwclient):
     return
 
 def createLogGroup(logGroupName, region, AwsAccountId):
+    logGroupName = logGroupName.replace('$default','dollar_default')
     try:
         logsclient = boto3.client('logs',region_name=region)
         response = logsclient.create_log_group(
@@ -3083,10 +3176,10 @@ def createLogGroup(logGroupName, region, AwsAccountId):
 
 if __name__ == "__main__":
     event = {
-       #"ResourceId": "arn:aws:elasticloadbalancing:us-east-1:924746602103:loadbalancer/app/XPVA-SYNAPS-SYNAPS-DEV1/a14b93bcfe33d728",
-       "ResourceId": "arn:aws:apigateway:us-east-1::/apis/b8snwl9re7/stages/default",
-       "ResourceType": "AwsApiGatewayV2Stage",
-       "AccountId": "234772128127",
+       "ResourceId": "arn:aws:cloudfront::619391186421:distribution/E32G6YNRXCGN90",
+       "LoggingBucket": "sharr-logging-cloudfront-619391186421-us-east-1",
+       "ResourceType": "AwsCloudFrontDistribution",
+       "AccountId": "619391186421",
        "Region": "us-east-1",
     }
     result = runbook_handler(event,"")
@@ -3123,7 +3216,7 @@ if __name__ == "__main__":
               "type": "String",
             },
             "ResourceId": {
-              "allowedPattern": "^arn:[a-zA-Z0-9][a-zA-Z0-9-_:\\/]{0,255}$",
+              "allowedPattern": "(.*)$",
               "description": "The ARN of the resource",
               "type": "String",
             },
@@ -4219,7 +4312,7 @@ def enable_trail_encryption(event, _):
     },
     "ASREnableCloudTrailLogFileValidation": {
       "DependsOn": [
-        "CreateWait5",
+        "CreateWait6",
       ],
       "Properties": {
         "Content": {
@@ -4454,9 +4547,843 @@ def wait_for_loggroup(event, _):
       },
       "Type": "AWS::SSM::Document",
     },
+    "ASREnableCloudfrontLogging": {
+      "DependsOn": [
+        "CreateWait5",
+      ],
+      "Properties": {
+        "Content": {
+          "assumeRole": "{{ AutomationAssumeRole }}",
+          "description": "### Document name - ASR-EnableCloudfrontLogging
+
+## What does this document do?
+Enables appropriate Cloudfront Logging:
+
+
+## Input Parameters
+* AutomationAssumeRole: (Required) The Amazon Resource Name (ARN) of the AWS Identity and Access Management (IAM) role that allows Systems Manager Automation to perform the actions on your behalf.
+* ResourceId: (Required) The Resource ID
+* Region: (Required) Finding Region
+* Accountid: (Required) Account Id
+
+## Output Parameters
+* Remediation.Output: STDOUT and messages from the remediation steps.
+",
+          "mainSteps": [
+            {
+              "action": "aws:executeScript",
+              "inputs": {
+                "Handler": "runbook_handler",
+                "InputPayload": {
+                  "AccountId": "{{AccountId}}",
+                  "Region": "{{Region}}",
+                  "ResourceId": "{{ResourceId}}",
+                  "ResourceType": "{{ResourceType}}",
+                },
+                "Runtime": "python3.8",
+                "Script": "import logging
+import copy
+import json
+import time
+from pprint import pprint
+import botocore
+import boto3
+from botocore.exceptions import ClientError
+from botocore.config import Config
+
+def get_bucket_lifecycle_of_s3(s3_client, bucket_name):
+  try:
+      result = s3_client.get_bucket_lifecycle_configuration(Bucket=bucket_name)
+  except ClientError as e:
+      return None
+  except Exception as e:
+      raise Exception( "Unexpected error in get_bucket_lifecycle_of_s3 function: " + e.__str__())
+  return result
+
+def put_bucket_lifecycle_of_s3(s3_resource, bucket_name):
+  #s3 = boto3.resource('s3')
+  bucket_lifecycle_configuration = s3_resource.BucketLifecycleConfiguration(bucket_name)
+  response = bucket_lifecycle_configuration.put(
+    LifecycleConfiguration={
+        'Rules': [
+             {
+               "Expiration":{
+                  "Days":365
+                },
+                "ID":"DefaultSHARRRetention",
+                "Status":"Enabled",
+                "Filter": {
+                  "Prefix": ""
+                },
+                "NoncurrentVersionExpiration":{
+                    "NoncurrentDays":45
+                },
+                "AbortIncompleteMultipartUpload":{
+                  "DaysAfterInitiation":30
+                }
+              }
+        ]
+    }
+  )  
+  return response
+
+def create_bucket(s3_client, bucket_name, region):
+  """Create an S3 bucket in a specified region
+
+  If a region is not specified, the bucket is created in the S3 default
+  region (us-east-1).
+
+  :param bucket_name: Bucket to create
+  :param region: String region to create bucket in, e.g., 'us-west-2'
+  :return: True if bucket created, else False
+  """
+
+  # Create bucket
+  try:
+    if region != 'us-east-1':
+        try:
+          bucket = s3_client.create_bucket(
+            Bucket=bucket_name,
+            #ACL='private',
+            CreateBucketConfiguration={ 
+              'LocationConstraint': region
+            },
+            ObjectLockEnabledForBucket=False,
+            ObjectOwnership='BucketOwnerPreferred'
+          ) 
+        except botocore.exceptions.ClientError as error:
+          if error.response['Error']['Code'] == 'BucketAlreadyExists':
+              logging.info(f"The server access log bucket {bucket_name} already exists")
+          else:
+              logging.error(f"Server access log bucket inaccessable {error.response['Error']['Code']}")
+          pass
+    else:
+        try:
+          bucket = s3_client.create_bucket(
+            Bucket=bucket_name,
+            #ACL='private',
+            ObjectLockEnabledForBucket=False,
+            ObjectOwnership='BucketOwnerPreferred'
+          ) 
+        except botocore.exceptions.ClientError as error:
+          if error.response['Error']['Code'] == 'BucketAlreadyExists':
+              logging.info(f"The server access log bucket {bucket_name} already exists")
+          else:
+              logging.error(f"Server access log bucket inaccessable {error.response['Error']['Code']}")
+          pass
+    
+    logging.info(f"Ensuring AES256 on {bucket_name}")
+    s3_client.put_bucket_encryption(
+        Bucket=bucket_name,
+        ServerSideEncryptionConfiguration={
+            "Rules": [
+                {"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}
+            ]
+        },
+    )
+
+    logging.info(f"Ensuring Versioning on {bucket_name}")   
+    s3_client.put_bucket_versioning(
+        Bucket=bucket_name,
+        VersioningConfiguration={
+            'Status': 'Enabled'
+        },
+    )
+    
+    logging.info(f"Ensuring Public Access Block on {bucket_name}") 
+    response = s3_client.put_public_access_block(
+        Bucket=bucket_name,
+        PublicAccessBlockConfiguration={
+            'BlockPublicAcls': True,
+            'IgnorePublicAcls': True,
+            'BlockPublicPolicy': True,
+            'RestrictPublicBuckets': True
+        }
+    )
+
+    # See Permissions required to configure standard logging and to access your log files
+    # https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/AccessLogs.html
+    logging.info(f"Granting Logging Account ACL on {bucket_name}") 
+    print(bucket_name)
+    existingACL = s3_client.get_bucket_acl(Bucket=bucket_name)
+    existingACL.pop("ResponseMetadata")
+    
+    #printJson(existingACL)
+    #exit()
+    foundGrant = False
+    newGrants = []
+    for grant in existingACL['Grants']:
+        
+        if grant['Grantee']['ID'] == 'c4c1ede66af53448b93c283ce9448c4ba468c9432aa01d700d3878632f77d2d0':
+            grant = {
+                "Grantee": {
+                    "ID": 'c4c1ede66af53448b93c283ce9448c4ba468c9432aa01d700d3878632f77d2d0',
+                    "DisplayName": 'AWS Logging',
+                    'Type': 'CanonicalUser'
+                },
+                "Permission": "WRITE"
+            }
+            foundGrant = True
+        newGrants.append(grant)
+    if foundGrant == False:
+        newGrants.append({
+            "Grantee": {
+              "ID": 'c4c1ede66af53448b93c283ce9448c4ba468c9432aa01d700d3878632f77d2d0',
+              "DisplayName": 'AWS Logging',
+              'Type': 'CanonicalUser'
+            },
+            "Permission": "WRITE"
+        })
+    existingACL['Grants'] = newGrants
+    
+    s3_client.put_bucket_acl(
+        AccessControlPolicy=existingACL,
+        Bucket=bucket_name,
+    )
+  except ClientError as e:
+    logging.error(e)
+    return False
+  
+  return True
+
+def updateBucketPolicies(s3_client, s3_resource, serviceName, region, storageBucket):
+  # Get the existing policy document
+  # Retrieve the policy of the specified bucket
+  
+  #bucketArn = 'arn:aws:s3:::'+bucketName+'/*'
+  matchedELBLogging = False
+  matchedSSL = False
+  updatePolicy = False
+  statements = []
+  try:
+    result = s3_client.get_bucket_policy(Bucket=storageBucket)
+    policy = eval(result['Policy'])
+    statements = policy['Statement']
+    for statement in statements:
+        try:
+            if statement['Effect'] == 'Deny' and statement['Condition']['Bool']['aws:SecureTransport'] == "false":
+                matchedSSL = True
+        except:
+            pass
+    
+  except botocore.exceptions.ClientError as error:
+    print(error.response['Error']['Code'])
+    print('Creating a new policy')
+    policy = json.loads('{ "Id": "SharrLoggingPolicy", "Version": "2012-10-17","Statement": []}')
+    updatePolicy = True
+    statements = []
+    
+  if matchedSSL:
+    print(storageBucket + ' already has a policy statement for SSL Only')
+  else:
+    print('Adding SSL Only to policy')
+    newStatement = json.loads('{"Sid": "SHARR-S3-Policy-SSLOnly","Action": "s3:*","Effect": "Deny","Resource": ["arn:aws:s3:::'+storageBucket+'","arn:aws:s3:::'+storageBucket+'/*"],"Condition": {"Bool": {"aws:SecureTransport": "false"}},"Principal": "*"}')
+    statements.append(newStatement)
+    updatePolicy = True
+    
+  if updatePolicy:
+    policy['Statement'] = statements
+    # Convert the policy from JSON dict to string
+    bucket_policy = json.dumps(policy)
+    # Set the new policy
+    s3_client.put_bucket_policy(Bucket=storageBucket, Policy=bucket_policy)
+    print(storageBucket+' Policy updated')
+  
+  #print(get_bucket_lifecycle_of_s3(s3, storageBucket))
+  if get_bucket_lifecycle_of_s3(s3_client, storageBucket) == None:
+    print("Adding a 365 day default retention policy")
+    print(put_bucket_lifecycle_of_s3(s3_resource,storageBucket))
+    
+  else:
+    print("Lifecycle policy found - not altering existing policy")
+    #print(get_bucket_lifecycle_of_s3(s3, storageBucket))  
+    
+  return
+
+def runbook_handler(event, context):
+  ResourceId = event['ResourceId']  
+  ResourceSplit = ResourceId.split(":")
+  serviceName = ResourceSplit[2]
+  region = event['Region']
+  AwsAccountId = ResourceSplit[4]
+  destBucket = 'sharr-logging-' + serviceName + '-' + AwsAccountId + '-' + region
+  destBucket = destBucket.lower()
+
+  my_config = Config(region_name = region)
+  s3_client = boto3.client('s3', config=my_config)
+  s3_resource = boto3.resource('s3', config=my_config)
+
+  # Create the Logging Bucket
+  create_bucket(s3_client, destBucket, region)
+
+  # Update the Bucket Policies
+  updateBucketPolicies(s3_client, s3_resource, serviceName, region, destBucket)
+
+  return {
+        'message': 'Logging bucket created and or verified',
+        'loggingBucketName': destBucket,
+        'status': 'RESOLVED'
+  }
+
+def printJson(object):
+    json_formatted_str = json.dumps(object, indent=2)
+    print(json_formatted_str)
+    return
+
+if __name__ == "__main__":
+    event = {
+       "ResourceId": "arn:aws:cloudfront::619391186421:distribution/E32G6YNRXCGN90",
+       "Region": "us-east-1"
+    }
+    result = runbook_handler(event,"")
+    print(result)",
+              },
+              "isEnd": false,
+              "name": "CreateBucket",
+              "outputs": [
+                {
+                  "Name": "Output",
+                  "Selector": "$.Payload.response",
+                  "Type": "StringMap",
+                },
+                {
+                  "Name": "LoggingBucketName",
+                  "Selector": "$.Payload.response",
+                  "Type": "String",
+                },
+              ],
+            },
+            {
+              "action": "aws:executeScript",
+              "inputs": {
+                "Handler": "runbook_handler",
+                "InputPayload": {
+                  "AccountId": "{{AccountId}}",
+                  "LoggingBucketName": "{{CreateBucket.LoggingBucketName}}",
+                  "Region": "{{Region}}",
+                  "ResourceId": "{{ResourceId}}",
+                  "ResourceType": "{{ResourceType}}",
+                },
+                "Runtime": "python3.8",
+                "Script": "import logging
+import copy
+import json
+import time
+from pprint import pprint
+import botocore
+import boto3
+from botocore.exceptions import ClientError
+from botocore.config import Config
+
+
+def runbook_handler(event, context):
+  ResourceId = event['ResourceId']  
+  # arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/XPVA-TstAR2-DID-DEV1/25d1f4f34ae00664
+  # arn:aws:apigateway:us-east-1::/restapis/2abcdefghi/stages/prod
+
+  ResourceSplit = ResourceId.split(":")
+  serviceName = ResourceSplit[2]
+  if serviceName == 'elasticloadbalancing':
+    serviceName = 'elb'
+  region = event['Region']
+  AwsAccountId = event['AccountId']
+  ResourceType = event['ResourceType']
+  
+  loggingBucket = 'sharr-logging-' + serviceName + '-' + AwsAccountId + '-' + region.lower()
+
+  if serviceName == 'elb':
+    client = boto3.client('elbv2', region_name = region)
+    try:
+        client.modify_load_balancer_attributes(
+            LoadBalancerArn=ResourceId,
+            Attributes=[
+                {'Key': 'access_logs.s3.enabled','Value': 'true'},
+                {'Key': 'access_logs.s3.bucket','Value': loggingBucket},
+            ]
+        )
+        return {
+            'message': 'ELB Resource Modified for logging',
+            'status': 'RESOLVED'
+        }
+    except Exception as e:
+        print("Unable to set logging on elbv2")
+        print(e)
+
+  if ResourceType == "AwsApiGatewayStage":
+    try:
+        apigwclient = boto3.client('apigateway',region_name=region)   #Use V2 for Websocket and V1 for Rest
+        apigwArray = ResourceSplit[5].split('/')
+        ApiId = apigwArray[2]
+        stageName = apigwArray[4]
+
+        # Make sure API Gateway Account level settings have Cloudwatch Role
+        setupAPIGatewayAccountSettings(AwsAccountId, apigwclient)
+        
+        # Get/Create Log Group for access and execution logging
+        accesslogGroupArn = createLogGroup('API-Gateway-Access-Logs_'+ApiId+'/'+stageName, region, AwsAccountId)
+        #executelogGroupArn = createLogGroup('/aws/apigateway/execution/'+ApiId+'/'+stageName, region, AwsAccountId)
+        
+        # Get the current Stage Info and figure out whats needed
+        response = apigwclient.get_stage(restApiId=ApiId, stageName=stageName)
+        
+        # Access Logging required?
+        try:
+            accessLogSettings = response['accessLogSettings']['destinationArn']
+            if accessLogSettings != '':
+                setAccessLogging = False
+            else:
+                setAccessLogging = True
+        except Exception as e:
+            setAccessLogging = True
+            pass
+
+        # Execute Logging Required?
+        try:
+            methodSettings = response['methodSettings']['*/*']['loggingLevel']
+            if methodSettings == 'OFF':
+                setMethodLogging = True
+            else:
+                setMethodLogging = False
+        except Exception as e:
+            setMethodLogging = True
+            pass
+
+        # XRay Tracing Required?
+        try:
+            xray = response['tracingEnabled']
+            if xray == False:
+                setXray = True
+            else:
+                setXray = False
+        except Exception as e:
+            setXray = True
+            pass
+
+        # Build up an array of items to patch
+        PatchOperations = []
+        if setAccessLogging:
+            operation = {
+                'op': 'replace',
+                'path': '/accessLogSettings/destinationArn',
+                'value': accesslogGroupArn,
+                #'from': 'string'
+            }
+            PatchOperations.append(operation)
+            operation = {
+                'op': 'replace',
+                'path': '/accessLogSettings/format',
+                'value': '{ "requestId":"$context.requestId", "ip": "$context.identity.sourceIp", "caller":"$context.identity.caller", "user":"$context.identity.user","requestTime":"$context.requestTime", "httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath", "status":"$context.status","protocol":"$context.protocol", "responseLength":"$context.responseLength" }',
+                #'from': 'string'
+            }
+            PatchOperations.append(operation)
+        if setXray:
+            operation = {
+                'op': 'replace',
+                'path': '/tracingEnabled',
+                'value': 'true',
+            }
+            PatchOperations.append(operation)
+        if setMethodLogging:
+            operation = {
+                'op': 'replace',
+                'path': '/*/*/logging/loglevel',
+                'value': 'ERROR',
+            }
+            PatchOperations.append(operation)
+
+        # If there are items to patch, then patch them!
+        if len(PatchOperations) > 0:
+            print("[INFO] The following Patch operations to the stage {stageName} will occur")
+            for operation in PatchOperations:
+                print(operation) 
+
+            try:
+                apigwclient.update_stage(
+                    restApiId=ApiId,
+                    stageName=stageName,
+                    patchOperations=PatchOperations
+                )
+            except Exception as error:
+                print(error)
+                return {
+                    'message': error,
+                    'status': 'ERROR'
+                }
+        else:
+            print("[ERROR] No Patch operations required for APIGateway - Why was remediation requested?")
+
+        return {
+            'message': 'API Gateway modified for logging',
+            'status': 'RESOLVED'
+        }
+    except Exception as e:
+        print("Unable to set logging on APIGateway")
+        print(e)
+        return {
+            'message': f'Unable to set up logging on APIGW {e}',
+            'status': 'ERROR'
+        }
+
+  if ResourceType == "AwsApiGatewayV2Stage":
+    try:
+        apigwclientv2 = boto3.client('apigatewayv2',region_name=region) 
+        apigwclientv1 = boto3.client('apigateway',region_name=region) 
+        apigwArray = ResourceSplit[5].split('/')
+        ApiId = apigwArray[2]
+        stageName = apigwArray[4]
+
+        # Make sure API Gateway Account level settings have Cloudwatch Role
+        setupAPIGatewayAccountSettings(AwsAccountId, apigwclientv1)     # uses v1 settings for account level
+        
+        # Get/Create Log Group for access and execution logging
+        accesslogGroupArn = createLogGroup('API-Gateway-Access-Logs_'+ApiId+'/'+stageName, region, AwsAccountId)
+
+        # Get some info on the API
+        response = apigwclientv2.get_api(ApiId=ApiId)
+        ProtocolType = response['ProtocolType']
+        if ProtocolType != "HTTP" and ProtocolType != "WEBSOCKET":
+            exit(f"Invalid Protocol type on API [{ProtocolType}]")
+        
+        
+        # Get the current Stage Info and figure out whats needed
+        response = apigwclientv2.get_stage(ApiId=ApiId, StageName=stageName)    # Params differ v1 to v2
+        
+        # Access Logging required?
+        setAccessLogging = True
+        if 'AccessLogSettings' in response:
+            if 'DestinationArn' in response['AccessLogSettings']:
+                accessLogSettings = response['AccessLogSettings']['DestinationArn']
+                if accessLogSettings != '':
+                    setAccessLogging = False
+
+        # Execute Logging Required?
+        try:
+            methodSettings = response['DefaultRouteSettings']['LoggingLevel']
+            if methodSettings == 'OFF':
+                setMethodLogging = True
+            else:
+                setMethodLogging = False
+        except Exception as e:
+            setMethodLogging = True
+            pass
+
+        # XRay Tracing Required?
+        setXray = False
+        # try:
+        #     xray = response['DefaultRouteSettings']['LoggingLevel']
+        #     if xray == False:
+        #         setXray = True
+        #     else:
+        #         setXray = False
+        # except Exception as e:
+        #     setXray = True
+        #     pass
+
+        # Build up an array of items to patch
+        PatchOperations = {}
+        if setAccessLogging:
+            operation = {}
+            operation['DestinationArn'] = accesslogGroupArn
+            operation['Format'] = '{ "requestId":"$context.requestId", "ip": "$context.identity.sourceIp", "caller":"$context.identity.caller", "user":"$context.identity.user","requestTime":"$context.requestTime", "httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath", "status":"$context.status","protocol":"$context.protocol", "responseLength":"$context.responseLength" }'
+            PatchOperations['AccessLogSettings'] = operation
+            
+        # if setXray:
+        #     operation = {
+        #         'op': 'replace',
+        #         'path': '/tracingEnabled',
+        #         'value': 'true',
+        #     }
+        #     PatchOperations.append(operation)
+        
+        if setMethodLogging and ProtocolType == 'WEBSOCKET':
+            operation = {}
+            operation['LoggingLevel'] = 'ERROR'
+            PatchOperations['DefaultRouteSettings'] = operation
+
+        # If there are items to patch, then patch them!
+        if len(PatchOperations) > 0:
+            PatchOperations['ApiId'] = ApiId
+            PatchOperations['StageName'] = stageName
+
+            print(f"[INFO] The following Patch operations to the stage {stageName} will occur")
+            print(PatchOperations)
+
+            try:
+                apigwclientv2.update_stage(**PatchOperations)
+            except Exception as error:
+                print(error)
+                return {
+                    'message': error,
+                    'status': 'ERROR'
+                }
+        else:
+            print("[ERROR] No Patch operations required for APIGateway - Why was remediation requested?")
+
+        return {
+            'message': 'API Gateway modified for logging',
+            'status': 'RESOLVED'
+        }
+    except Exception as e:
+        print("Unable to set logging on APIGateway")
+        print(e)
+        return {
+            'message': f'Unable to set up logging on APIGW {e}',
+            'status': 'ERROR'
+        }
+
+  if ResourceType == "AwsCloudFrontDistribution":
+        DEBUG = False
+        
+        distributionSplit = ResourceSplit[5].split('/')
+        distributionId = distributionSplit[1]
+
+        # Get the current Distribution Config
+        # To update a web distribution using the CloudFront API
+        #   Use GetDistributionConfig to get the current configuration, including the version identifier ( ETag).
+        #   Update the distribution configuration that was returned in the response. Note the following important requirements and restrictions:
+        #   You must rename the ETag field to IfMatch, leaving the value unchanged. (Set the value of IfMatch to the value of ETag, then remove the ETag field.)
+        #   You can’t change the value of CallerReference.
+        #   Submit an UpdateDistribution request, providing the distribution configuration. The new configuration replaces the existing configuration. The values that you specify in an UpdateDistribution request are not merged into your existing configuration. Make sure to include all fields: the ones that you modified and also the ones that you didn’t.
+
+        # Permissions required:  
+        # remediationPolicy2.addActions('cloudfront:GetDistribution*', 'cloudfront:UpdateDistribution');
+
+        cloudfrontClient = boto3.client('cloudfront')
+        response = cloudfrontClient.get_distribution(Id=distributionId)
+        print(f"Distribution {distributionId} currently has a status of {response['Distribution']['Status']}")
+        if response['Distribution']['Status'] != "Deployed":
+            exit("cannot update cloudfront config when its status is {response['Distribution']['Status']}")
+
+        print(f"Getting current distribution config for {distributionId}")
+        distroConfig = response = cloudfrontClient.get_distribution_config(Id=distributionId)
+        ETag = distroConfig["ETag"]
+        distroConfig.pop("ETag")                # Get rid of this.  Actually change it to IfMatch 
+        distroConfig.pop("ResponseMetadata")    # No use for this info, and not to be passed back
+        distroConfig["IfMatch"] = ETag
+        #printObject = printJson(distroConfig) if DEBUG is True else None
+        
+        updateDefaultRoot = True
+        if 'DefaultRootObject' in distroConfig['DistributionConfig']:
+            if distroConfig['DistributionConfig']['DefaultRootObject'] != "":
+                updateDefaultRoot = False
+
+        if updateDefaultRoot:
+            distroConfig['DistributionConfig']['DefaultRootObject'] = "index.html"
+            print(f"Updating DefaultRootObject from None to 'index.html' because security hub thinks its a necessary security precaution.")
+        else:
+            print(f"DefaultRootObject remains as {distroConfig['DistributionConfig']['DefaultRootObject']}")
+
+        ViewerProtocolPolicy = distroConfig['DistributionConfig']['DefaultCacheBehavior']['ViewerProtocolPolicy']
+        if ViewerProtocolPolicy == 'allow-all':
+            print(f"Updating ViewerProtocolPolicy from 'allow-all' to 'redirect-to-https' for better 'security'")
+            distroConfig['DistributionConfig']['DefaultCacheBehavior']['ViewerProtocolPolicy'] = 'redirect-to-https'
+        else:
+            print(f"ViewerProtocolPolicy of '{ViewerProtocolPolicy}' meets security requirement for https")
+
+        # Using SNI?
+        if distroConfig['DistributionConfig']['Aliases']['Quantity'] > 0:
+            SSLSupportMethod = distroConfig['DistributionConfig']['ViewerCertificate']['SSLSupportMethod']
+            MinimumProtocolVersion = distroConfig['DistributionConfig']['ViewerCertificate']['MinimumProtocolVersion']
+            DesiredProtocolVersion = 'TLSv1.2_2021'
+            if SSLSupportMethod != "sni-only":
+                print(f"[ERROR] CLOUDFRONT CONFIGURED WITH A NON STANDARD EXPENSIVE OPTION  (SSLSupportMethod={SSLSupportMethod})")
+            if MinimumProtocolVersion != DesiredProtocolVersion:
+                print(f"Updating Cloudfront viewer certificate, minimum security protocol requirement from {MinimumProtocolVersion} to {DesiredProtocolVersion}")
+                distroConfig['DistributionConfig']['ViewerCertificate']['MinimumProtocolVersion'] = DesiredProtocolVersion
+        else:
+            print(f"WARNING - You are not supposed to use the default domain name;  Please update to use a custom domain name (SNI)")
+
+        # http version http/2 and http/3
+        if distroConfig['DistributionConfig']['HttpVersion'] != "http2and3":
+            print("Updating maximum viewer configuration to allow up to HTTP/3 with TLS 1.3")
+            distroConfig['DistributionConfig']['HttpVersion'] = "http2and3"
+
+        if distroConfig['DistributionConfig']['Comment'] == "":
+            distroConfig['DistributionConfig']['Comment'] = "FIXME - You should really have a description for what this cloudfront does!"
+
+        if distroConfig['DistributionConfig']['Logging']['Enabled'] == False:
+            distroConfig['DistributionConfig']['Logging']['Enabled'] = True
+            distroConfig['DistributionConfig']['Logging']['IncludeCookies'] = True
+            distroConfig['DistributionConfig']['Logging']['Bucket'] = event['LoggingBucket']+'.s3.amazonaws.com'
+            distroConfig['DistributionConfig']['Logging']['Prefix'] = AwsAccountId+"/"
+            print(f"Set logging to bucket to {event['LoggingBucket']}")
+
+        if 'Id' not in distroConfig:
+            distroConfig['Id'] = distributionId
+
+
+        printObject = printJson(distroConfig) if DEBUG is True else None
+        
+        response = cloudfrontClient.update_distribution(**distroConfig)
+        return {
+            'message': 'Cloudfront logging and other defaults set',
+            'status': 'RESOLVED'
+        }
+
+  return {
+        'message': 'UNKNOWN Service requested for logging - IGNORED',
+        'status': 'ERROR'
+  }
+
+def printJson(object):
+    json_formatted_str = json.dumps(object, indent=2)
+    print(json_formatted_str)
+    return
+
+def setupAPIGatewayAccountSettings(AwsAccountId, apigwclient):
+    response = apigwclient.get_account()
+    if 'cloudwatchRoleArn' not in response:
+        # Create a cloudwatch role and assign it to account
+        iamClient = boto3.client('iam')
+        roleName = 'APIGatewayLogWriterRole'
+        try:
+            iamClient.create_role(
+                RoleName=roleName,
+                AssumeRolePolicyDocument='{"Version": "2012-10-17","Statement": [{"Sid": "","Effect": "Allow","Principal": {"Service": ["apigateway.amazonaws.com"]},"Action": ["sts:AssumeRole"]}]}',
+                Description='A role which allows API Gateway to write to CloudWatch Logs'
+            )
+
+        except botocore.exceptions.ClientError as error:
+            # Put your error handling logic here
+            if error.response['Error']['Code'] == 'EntityAlreadyExists':
+                print(f"[INFO] The role {roleName} already exists... proceeding")
+            else:
+                print(error)
+            pass
+
+        #Attach Permission to Role
+        try:
+            iamClient.attach_role_policy(
+                RoleName=roleName,
+                PolicyArn='arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs'
+            )
+        except Exception as e:
+            print(e)
+            pass
+        print(f"[INFO] Role {roleName} created and/or updated")
+        try:
+            response = apigwclient.update_account(
+                patchOperations=[
+                    {
+                        'op': 'replace',
+                        'path': '/cloudwatchRoleArn',
+                        'value': f"arn:aws:iam::{AwsAccountId}:role/APIGatewayLogWriterRole",
+                        #'from': 'string'
+                    },
+                ]
+            )
+        except Exception as e:
+            print(e)
+            pass
+    else:
+        print('[INFO] Cloudwatch Role already exists for API Gateway Account Settings... skipping Role Creation')
+    return
+
+def createLogGroup(logGroupName, region, AwsAccountId):
+    logGroupName = logGroupName.replace('$default','dollar_default')
+    try:
+        logsclient = boto3.client('logs',region_name=region)
+        response = logsclient.create_log_group(
+            logGroupName=logGroupName,
+            tags={
+                'CreatedBy': 'SHARR'
+            }
+        )
+    except botocore.exceptions.ClientError as error:
+        # Put your error handling logic here
+        # print(error.response['Error']['Code'])
+        if error.response['Error']['Code'] == 'ResourceAlreadyExistsException':
+            print(f"[INFO] The log Group {logGroupName} already exists... proceeding")
+        else:
+            print(error)
+        pass
+    
+    # Get log Group Info
+    response = logsclient.describe_log_groups(
+        logGroupNamePrefix=logGroupName,
+    )
+    try:
+        retention = response['logGroups'][0]['retentionInDays']
+    except Exception as error:
+        retention = -1
+
+    if retention < 0:
+        try:
+            logsclient.put_retention_policy(
+                logGroupName=logGroupName,
+                retentionInDays=365
+            )
+            print(f"[INFO] Adding Retention Period of 1 year days to {logGroupName}")
+        except Exception as error:
+            print(f"[ERROR] Failed to add Retention Period of 1 year to {logGroupName} {error}")
+
+    return f"arn:aws:logs:{region}:{AwsAccountId}:log-group:{logGroupName}" 
+
+
+if __name__ == "__main__":
+    event = {
+       "ResourceId": "arn:aws:cloudfront::619391186421:distribution/E32G6YNRXCGN90",
+       "LoggingBucket": "sharr-logging-cloudfront-619391186421-us-east-1",
+       "ResourceType": "AwsCloudFrontDistribution",
+       "AccountId": "619391186421",
+       "Region": "us-east-1",
+    }
+    result = runbook_handler(event,"")
+    print(result)",
+              },
+              "isEnd": true,
+              "name": "Remediation",
+              "outputs": [
+                {
+                  "Name": "Output",
+                  "Selector": "$.Payload.response",
+                  "Type": "StringMap",
+                },
+              ],
+            },
+          ],
+          "outputs": [
+            "Remediation.Output",
+          ],
+          "parameters": {
+            "AccountId": {
+              "allowedPattern": "^[0-9]{12}$",
+              "description": "The Account Id of the resource",
+              "type": "String",
+            },
+            "AutomationAssumeRole": {
+              "allowedPattern": "^arn:(?:aws|aws-us-gov|aws-cn):iam::\\d{12}:role/[\\w+=,.@-]+$",
+              "description": "(Required) The ARN of the role that allows Automation to perform the actions on your behalf.",
+              "type": "String",
+            },
+            "Region": {
+              "allowedPattern": "^[a-zA-Z0-9]{2}-[a-z]{0,12}-[0-9]{1,2}$",
+              "description": "The REGION of the resource",
+              "type": "String",
+            },
+            "ResourceId": {
+              "allowedPattern": "(.*)$",
+              "description": "The ARN of the resource",
+              "type": "String",
+            },
+            "ResourceType": {
+              "allowedPattern": "^[a-zA-Z][a-zA-Z0-9-_:]{0,25}$",
+              "description": "The Type of the resource (ie AwsApiGatewayStage for REST and AwsApiGatewayV2Stage for v2)",
+              "type": "String",
+            },
+          },
+          "schemaVersion": "0.3",
+        },
+        "DocumentFormat": "YAML",
+        "DocumentType": "Automation",
+        "Name": "ASR-EnableCloudfrontLogging",
+        "UpdateMethod": "NewVersion",
+      },
+      "Type": "AWS::SSM::Document",
+    },
     "ASREnableCopyTagsToSnapshotOnRDSCluster": {
       "DependsOn": [
-        "CreateWait6",
+        "CreateWait7",
       ],
       "Properties": {
         "Content": {
@@ -4910,7 +5837,7 @@ Enables Point In Time Recovery on a DynamoDB Table:
 
 ## Input Parameters
 * AutomationAssumeRole: (Required) The Amazon Resource Name (ARN) of the AWS Identity and Access Management (IAM) role that allows Systems Manager Automation to perform the actions on your behalf.
-* DDBTableArn: Table arn to set PITR Recovery on
+* TableArn: Table arn to set PITR Recovery on
 
 ## Output Parameters
 * Remediation.Output: STDOUT and messages from the remediation steps.
@@ -5003,7 +5930,7 @@ def lambda_handler(event, context):
               "type": "String",
             },
             "TableArn": {
-              "allowedPattern": "^[a-zA-Z0-9][a-zA-Z0-9-_:]{0,255}$",
+              "allowedPattern": "(.*)$",
               "description": "The ARN of a DynamoDB table to set PITR on",
               "type": "String",
             },
@@ -8288,7 +9215,7 @@ def update_bucket_policy(event, _):
     },
     "ASRSetIAMPasswordPolicy": {
       "DependsOn": [
-        "CreateWait7",
+        "CreateWait8",
       ],
       "Properties": {
         "Content": {
@@ -8706,7 +9633,7 @@ def add_ssl_bucket_policy(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "a693afe06a1109ed1c587da1723b4b9cd217537d61ca2d9d8deb5726b6eb9837",
+        "DocumentPropertiesHash": "3788efb168c2ea1f635c981c12b28578abbc2d73b710069f845bfbeca778a241",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8723,7 +9650,7 @@ def add_ssl_bucket_policy(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "4c8bc4a861f8a4d2a1faff97e89ee892ec3fbde542acf1d0aed2d7f3bd41e34a",
+        "DocumentPropertiesHash": "7a11ba76be74df67bc9317a39cb712fb46640c32a2f6778921bff6e91c0d3656",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8740,7 +9667,7 @@ def add_ssl_bucket_policy(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "cfcc5261304a9754f61d259dc8e7838320ab3e267db3748746565ae4c460bfd1",
+        "DocumentPropertiesHash": "3019784d140370d477d558524a83a1f0861880e535e5b67d02183e33fcf0927a",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8757,7 +9684,24 @@ def add_ssl_bucket_policy(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "a7b19d8dc3f4efc371794db8e6400746131475c9303b7832c6be677beeceb8cb",
+        "DocumentPropertiesHash": "0050ed789e781f4300e785f57a3a1018a56511ab478ad39c3f7f7ba74d4d769e",
+        "ServiceToken": {
+          "Ref": "WaitProviderServiceToken",
+        },
+        "UpdateIntervalSeconds": 1,
+      },
+      "Type": "Custom::Wait",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "CreateWait9": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "CreateWait8",
+      ],
+      "Properties": {
+        "CreateIntervalSeconds": 1,
+        "DeleteIntervalSeconds": 0,
+        "DocumentPropertiesHash": "42d066b6e9898d8438369acd2ada0cec86c5cefd3a588a23a71cfb76d0867321",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8881,14 +9825,14 @@ def add_ssl_bucket_policy(event, _):
         "ASRConfigureS3BucketPublicAccessBlock",
         "ASRConfigureS3PublicAccessBlock",
         "ASREnableAPIGatewayLogging",
-        "ASREnableCloudTrailLogFileValidation",
+        "ASREnableCloudfrontLogging",
         "ASREnableDynamoDBPITR",
         "DeletWait4",
       ],
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "a693afe06a1109ed1c587da1723b4b9cd217537d61ca2d9d8deb5726b6eb9837",
+        "DocumentPropertiesHash": "3788efb168c2ea1f635c981c12b28578abbc2d73b710069f845bfbeca778a241",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8900,7 +9844,7 @@ def add_ssl_bucket_policy(event, _):
     "DeletWait6": {
       "DeletionPolicy": "Delete",
       "DependsOn": [
-        "ASREnableCopyTagsToSnapshotOnRDSCluster",
+        "ASREnableCloudTrailLogFileValidation",
         "ASREnableEbsEncryptionByDefault",
         "ASREnableEnhancedMonitoringOnRDSInstance",
         "ASREnableKeyRotation",
@@ -8910,7 +9854,7 @@ def add_ssl_bucket_policy(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "4c8bc4a861f8a4d2a1faff97e89ee892ec3fbde542acf1d0aed2d7f3bd41e34a",
+        "DocumentPropertiesHash": "7a11ba76be74df67bc9317a39cb712fb46640c32a2f6778921bff6e91c0d3656",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8922,17 +9866,17 @@ def add_ssl_bucket_policy(event, _):
     "DeletWait7": {
       "DeletionPolicy": "Delete",
       "DependsOn": [
+        "ASREnableCopyTagsToSnapshotOnRDSCluster",
         "ASREnableMultiAZOnRDSInstance",
         "ASREnableRDSInstanceDeletionProtection",
         "ASRRemoveVPCDefaultSecurityGroupRules",
         "ASRRevokeUnusedIAMUserCredentials",
-        "ASRSetIAMPasswordPolicy",
         "DeletWait6",
       ],
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "cfcc5261304a9754f61d259dc8e7838320ab3e267db3748746565ae4c460bfd1",
+        "DocumentPropertiesHash": "3019784d140370d477d558524a83a1f0861880e535e5b67d02183e33fcf0927a",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -8945,16 +9889,34 @@ def add_ssl_bucket_policy(event, _):
       "DeletionPolicy": "Delete",
       "DependsOn": [
         "ASRDisablePublicAccessToRDSInstance",
-        "ASRDisablePublicIPAutoAssign",
         "ASREnableDeliveryStatusLoggingForSNSTopic",
         "ASREnableEncryptionForSNSTopic",
         "ASREnableMinorVersionUpgradeOnRDSDBInstance",
+        "ASRSetIAMPasswordPolicy",
         "DeletWait7",
       ],
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "a7b19d8dc3f4efc371794db8e6400746131475c9303b7832c6be677beeceb8cb",
+        "DocumentPropertiesHash": "0050ed789e781f4300e785f57a3a1018a56511ab478ad39c3f7f7ba74d4d769e",
+        "ServiceToken": {
+          "Ref": "WaitProviderServiceToken",
+        },
+        "UpdateIntervalSeconds": 0,
+      },
+      "Type": "Custom::Wait",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "DeletWait9": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "ASRDisablePublicIPAutoAssign",
+        "DeletWait8",
+      ],
+      "Properties": {
+        "CreateIntervalSeconds": 0,
+        "DeleteIntervalSeconds": 0.5,
+        "DocumentPropertiesHash": "42d066b6e9898d8438369acd2ada0cec86c5cefd3a588a23a71cfb76d0867321",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },

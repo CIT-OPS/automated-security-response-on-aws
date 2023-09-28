@@ -61,12 +61,12 @@ def create_bucket(s3_client, bucket_name, region):
         try:
           bucket = s3_client.create_bucket(
             Bucket=bucket_name,
-            ACL='private',
+            #ACL='private',
             CreateBucketConfiguration={ 
               'LocationConstraint': region
             },
             ObjectLockEnabledForBucket=False,
-            ObjectOwnership='BucketOwnerEnforced'
+            ObjectOwnership='BucketOwnerPreferred'
           ) 
         except botocore.exceptions.ClientError as error:
           if error.response['Error']['Code'] == 'BucketAlreadyExists':
@@ -78,9 +78,9 @@ def create_bucket(s3_client, bucket_name, region):
         try:
           bucket = s3_client.create_bucket(
             Bucket=bucket_name,
-            ACL='private',
+            #ACL='private',
             ObjectLockEnabledForBucket=False,
-            ObjectOwnership='BucketOwnerEnforced'
+            ObjectOwnership='BucketOwnerPreferred'
           ) 
         except botocore.exceptions.ClientError as error:
           if error.response['Error']['Code'] == 'BucketAlreadyExists':
@@ -90,7 +90,7 @@ def create_bucket(s3_client, bucket_name, region):
           pass
     
     logging.info(f"Ensuring AES256 on {bucket_name}")
-    response = s3_client.put_bucket_encryption(
+    s3_client.put_bucket_encryption(
         Bucket=bucket_name,
         ServerSideEncryptionConfiguration={
             "Rules": [
@@ -100,7 +100,7 @@ def create_bucket(s3_client, bucket_name, region):
     )
 
     logging.info(f"Ensuring Versioning on {bucket_name}")   
-    response = s3_client.put_bucket_versioning(
+    s3_client.put_bucket_versioning(
         Bucket=bucket_name,
         VersioningConfiguration={
             'Status': 'Enabled'
@@ -116,6 +116,46 @@ def create_bucket(s3_client, bucket_name, region):
             'BlockPublicPolicy': True,
             'RestrictPublicBuckets': True
         }
+    )
+
+    # See Permissions required to configure standard logging and to access your log files
+    # https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/AccessLogs.html
+    logging.info(f"Granting Logging Account ACL on {bucket_name}") 
+    print(bucket_name)
+    existingACL = s3_client.get_bucket_acl(Bucket=bucket_name)
+    existingACL.pop("ResponseMetadata")
+    
+    #printJson(existingACL)
+    #exit()
+    foundGrant = False
+    newGrants = []
+    for grant in existingACL['Grants']:
+        
+        if grant['Grantee']['ID'] == 'c4c1ede66af53448b93c283ce9448c4ba468c9432aa01d700d3878632f77d2d0':
+            grant = {
+                "Grantee": {
+                    "ID": 'c4c1ede66af53448b93c283ce9448c4ba468c9432aa01d700d3878632f77d2d0',
+                    "DisplayName": 'AWS Logging',
+                    'Type': 'CanonicalUser'
+                },
+                "Permission": "WRITE"
+            }
+            foundGrant = True
+        newGrants.append(grant)
+    if foundGrant == False:
+        newGrants.append({
+            "Grantee": {
+              "ID": 'c4c1ede66af53448b93c283ce9448c4ba468c9432aa01d700d3878632f77d2d0',
+              "DisplayName": 'AWS Logging',
+              'Type': 'CanonicalUser'
+            },
+            "Permission": "WRITE"
+        })
+    existingACL['Grants'] = newGrants
+    
+    s3_client.put_bucket_acl(
+        AccessControlPolicy=existingACL,
+        Bucket=bucket_name,
     )
   except ClientError as e:
     logging.error(e)
@@ -137,42 +177,6 @@ def updateBucketPolicies(s3_client, s3_resource, serviceName, region, storageBuc
     policy = eval(result['Policy'])
     statements = policy['Statement']
     for statement in statements:
-        # Elastic Load Balancer
-        try:
-            if statement['Principal']['Service'] == 'logdelivery.elasticloadbalancing.amazonaws.com':
-                matchedELBLogging = True
-        except:
-            pass
-        
-        try:
-            if statement['Principal']['AWS'] == 'arn:aws:iam::127311923021:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::033677994240:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::027434742980:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::797873946194:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::098369216593:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::754344448648:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::589379963580:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::718504428378:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::383597477331:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::600734575887:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::114774131450:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::783225319266:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::582318560864:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::985666609251:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::054676820928:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::156460612806:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::652711504416:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::635631232127:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::009996457667:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::897822967062:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::076674570225:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::507241528517:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::048591011584:root' or \
-            statement['Principal']['AWS'] == 'arn:aws:iam::190560391635:root':
-                matchedELBLogging = True
-        except:
-            pass
-
         try:
             if statement['Effect'] == 'Deny' and statement['Condition']['Bool']['aws:SecureTransport'] == "false":
                 matchedSSL = True
@@ -194,16 +198,6 @@ def updateBucketPolicies(s3_client, s3_resource, serviceName, region, storageBuc
     statements.append(newStatement)
     updatePolicy = True
     
-  if serviceName == 'elb':
-    if matchedELBLogging:
-        print(storageBucket + ' already has a policy statement for ELB logging')
-    else:
-        print('Adding ELB Logging to policy')
-        
-        newStatement = json.loads('{"Sid": "SHARR-ELB-Policy-DO-NOT-MODIFY-'+str(int(time.time()))+'", "Effect":"Allow","Principal":{"AWS": "'+determineELBPrincipal(region)+'"},"Action":"s3:PutObject","Resource":"arn:aws:s3:::'+storageBucket+'/*"}')
-        statements.append(newStatement)
-        updatePolicy = True
-    
   if updatePolicy:
     policy['Statement'] = statements
     # Convert the policy from JSON dict to string
@@ -223,31 +217,11 @@ def updateBucketPolicies(s3_client, s3_resource, serviceName, region, storageBuc
     
   return
 
-def determineELBPrincipal(region):
-    elbAccountId = ''
-    if region == 'us-east-1':
-       elbAccountId = '127311923021'
-    elif region == 'us-east-2':
-       elbAccountId = '033677994240'
-    elif region == 'us-west-1':
-       elbAccountId = '027434742980'
-    elif region == 'us-west-2':
-       elbAccountId = '797873946194'
-    elif region == 'ca-central-1':
-       elbAccountId = '985666609251'
-    elif region == 'ap-southeast-2':
-       elbAccountId = '783225319266'
-    elif region == 'eu-west-2':
-       elbAccountId = '652711504416'
-    return "arn:aws:iam::"+elbAccountId+":root"
-
 def runbook_handler(event, context):
-  ResourceId = event['ResourceId']  # arn:aws:elasticloadbalancing:us-east-1:857932575317:loadbalancer/app/XPVA-TstAR2-DID-DEV1/25d1f4f34ae00664
+  ResourceId = event['ResourceId']  
   ResourceSplit = ResourceId.split(":")
   serviceName = ResourceSplit[2]
-  if serviceName == 'elasticloadbalancing':
-    serviceName = 'elb'
-  region = ResourceSplit[3]
+  region = event['Region']
   AwsAccountId = ResourceSplit[4]
   destBucket = 'sharr-logging-' + serviceName + '-' + AwsAccountId + '-' + region
   destBucket = destBucket.lower()
@@ -268,9 +242,15 @@ def runbook_handler(event, context):
         'status': 'RESOLVED'
   }
 
+def printJson(object):
+    json_formatted_str = json.dumps(object, indent=2)
+    print(json_formatted_str)
+    return
+
 if __name__ == "__main__":
     event = {
-       "ResourceId": "arn:aws:elasticloadbalancing:us-east-1:924746602103:loadbalancer/app/XPVA-SYNAPS-SYNAPS-DEV1/a14b93bcfe33d728",
+       "ResourceId": "arn:aws:cloudfront::619391186421:distribution/E32G6YNRXCGN90",
+       "Region": "us-east-1"
     }
     result = runbook_handler(event,"")
     print(result)

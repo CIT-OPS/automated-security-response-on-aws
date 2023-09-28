@@ -215,6 +215,10 @@ export function getRegexRegistry(): RegexRegistry {
   registry.addCase(new RegexTestCase(String.raw`^[a-zA-Z0-9-]{1,35}$`, 'RDS Cluster ID', [], []));
   registry.addCase(new RegexTestCase(String.raw`^cluster-[A-Z0-9]+$`, 'RDS DB Resource Cluster ID', [], []));
 
+  // Not sure if this does anything yet - KPP
+  registry.addCase(new RegexTestCase(String.raw`(.*)$`, 'CNXC ANYTHING', [], []));
+  registry.addCase(new RegexTestCase(String.raw`^[a-zA-Z][a-zA-Z0-9-_:]{0,25}$`, 'Resource Type', [], []));
+  
   registry.addCase(
     new RegexTestCase(
       String.raw`^db-[A-Z0-9]{26}$`,
