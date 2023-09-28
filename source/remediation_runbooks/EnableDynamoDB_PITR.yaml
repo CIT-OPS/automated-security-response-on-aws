@@ -8,7 +8,7 @@ description: |
 
   ## Input Parameters
   * AutomationAssumeRole: (Required) The Amazon Resource Name (ARN) of the AWS Identity and Access Management (IAM) role that allows Systems Manager Automation to perform the actions on your behalf.
-  * DDBTableArn: Table arn to set PITR Recovery on
+  * TableArn: Table arn to set PITR Recovery on
 
   ## Output Parameters
   * Remediation.Output: STDOUT and messages from the remediation steps.
@@ -22,7 +22,7 @@ parameters:
   TableArn:
     type: String
     description: The ARN of a DynamoDB table to set PITR on
-    allowedPattern: '^[a-zA-Z0-9][a-zA-Z0-9-_:]{0,255}$'
+    allowedPattern: '(.*)$'
     
 outputs:
   - Remediation.Output

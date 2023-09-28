@@ -10,6 +10,15 @@ from botocore.exceptions import ClientError
 
 def enableAccessLogging(s3, bucketName, storageBucket, targetPrefix):
   print(f"Now setting logging on {bucketName} --> {storageBucket}/{targetPrefix}")
+  return s3.put_bucket_logging(
+      Bucket=bucketName,
+      BucketLoggingStatus={
+          'LoggingEnabled': {
+              'TargetBucket': storageBucket,
+              'TargetPrefix': targetPrefix
+          }
+      }
+  )
 
 def runbook_handler(event, context):
   s3_client = boto3.client('s3')

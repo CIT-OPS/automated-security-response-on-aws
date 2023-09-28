@@ -31,7 +31,9 @@ const remediations: IControl[] = [
   { control: 'AutoScaling.1' },
   { control: 'APIGateway.1' },                            // CNXC API Gateway REST and WebSocket API execution logging should be enabled
   { control: 'APIGateway.3', executes: 'APIGateway.1'},   // CNXC API Gateway REST API stages should have AWS X-Ray tracing enabled
-  { control: 'APIGateway.9', executes: 'APIGateway.1' },  // CNXC Access logging should be configured for API Gateway V2 Stages
+  { control: 'CloudFront.1'},                             // CNXC CloudFront distributions should have a default root object configured
+  { control: 'CloudFront.3', executes: 'CloudFront.1' },  // CNXC CloudFront distributions should require encryption in transit
+  { control: 'CloudFront.5', executes: 'CloudFront.1' },  // CNXC CloudFront distributions should have logging enabled
   { control: 'CloudTrail.1' },
   { control: 'CloudTrail.2' },
   { control: 'CloudTrail.3', executes: 'CloudTrail.1' },

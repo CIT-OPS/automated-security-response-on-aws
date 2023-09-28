@@ -264,12 +264,104 @@ def runbook_handler(event, context):
             'status': 'ERROR'
         }
 
+  if ResourceType == "AwsCloudFrontDistribution":
+        DEBUG = False
+        
+        distributionSplit = ResourceSplit[5].split('/')
+        distributionId = distributionSplit[1]
+
+        # Get the current Distribution Config
+        # To update a web distribution using the CloudFront API
+        #   Use GetDistributionConfig to get the current configuration, including the version identifier ( ETag).
+        #   Update the distribution configuration that was returned in the response. Note the following important requirements and restrictions:
+        #   You must rename the ETag field to IfMatch, leaving the value unchanged. (Set the value of IfMatch to the value of ETag, then remove the ETag field.)
+        #   You can’t change the value of CallerReference.
+        #   Submit an UpdateDistribution request, providing the distribution configuration. The new configuration replaces the existing configuration. The values that you specify in an UpdateDistribution request are not merged into your existing configuration. Make sure to include all fields: the ones that you modified and also the ones that you didn’t.
+
+        # Permissions required:  
+        # remediationPolicy2.addActions('cloudfront:GetDistribution*', 'cloudfront:UpdateDistribution');
+
+        cloudfrontClient = boto3.client('cloudfront')
+        response = cloudfrontClient.get_distribution(Id=distributionId)
+        print(f"Distribution {distributionId} currently has a status of {response['Distribution']['Status']}")
+        if response['Distribution']['Status'] != "Deployed":
+            exit("cannot update cloudfront config when its status is {response['Distribution']['Status']}")
+
+        print(f"Getting current distribution config for {distributionId}")
+        distroConfig = response = cloudfrontClient.get_distribution_config(Id=distributionId)
+        ETag = distroConfig["ETag"]
+        distroConfig.pop("ETag")                # Get rid of this.  Actually change it to IfMatch 
+        distroConfig.pop("ResponseMetadata")    # No use for this info, and not to be passed back
+        distroConfig["IfMatch"] = ETag
+        #printObject = printJson(distroConfig) if DEBUG is True else None
+        
+        updateDefaultRoot = True
+        if 'DefaultRootObject' in distroConfig['DistributionConfig']:
+            if distroConfig['DistributionConfig']['DefaultRootObject'] != "":
+                updateDefaultRoot = False
+
+        if updateDefaultRoot:
+            distroConfig['DistributionConfig']['DefaultRootObject'] = "index.html"
+            print(f"Updating DefaultRootObject from None to 'index.html' because security hub thinks its a necessary security precaution.")
+        else:
+            print(f"DefaultRootObject remains as {distroConfig['DistributionConfig']['DefaultRootObject']}")
+
+        ViewerProtocolPolicy = distroConfig['DistributionConfig']['DefaultCacheBehavior']['ViewerProtocolPolicy']
+        if ViewerProtocolPolicy == 'allow-all':
+            print(f"Updating ViewerProtocolPolicy from 'allow-all' to 'redirect-to-https' for better 'security'")
+            distroConfig['DistributionConfig']['DefaultCacheBehavior']['ViewerProtocolPolicy'] = 'redirect-to-https'
+        else:
+            print(f"ViewerProtocolPolicy of '{ViewerProtocolPolicy}' meets security requirement for https")
+
+        # Using SNI?
+        if distroConfig['DistributionConfig']['Aliases']['Quantity'] > 0:
+            SSLSupportMethod = distroConfig['DistributionConfig']['ViewerCertificate']['SSLSupportMethod']
+            MinimumProtocolVersion = distroConfig['DistributionConfig']['ViewerCertificate']['MinimumProtocolVersion']
+            DesiredProtocolVersion = 'TLSv1.2_2021'
+            if SSLSupportMethod != "sni-only":
+                print(f"[ERROR] CLOUDFRONT CONFIGURED WITH A NON STANDARD EXPENSIVE OPTION  (SSLSupportMethod={SSLSupportMethod})")
+            if MinimumProtocolVersion != DesiredProtocolVersion:
+                print(f"Updating Cloudfront viewer certificate, minimum security protocol requirement from {MinimumProtocolVersion} to {DesiredProtocolVersion}")
+                distroConfig['DistributionConfig']['ViewerCertificate']['MinimumProtocolVersion'] = DesiredProtocolVersion
+        else:
+            print(f"WARNING - You are not supposed to use the default domain name;  Please update to use a custom domain name (SNI)")
+
+        # http version http/2 and http/3
+        if distroConfig['DistributionConfig']['HttpVersion'] != "http2and3":
+            print("Updating maximum viewer configuration to allow up to HTTP/3 with TLS 1.3")
+            distroConfig['DistributionConfig']['HttpVersion'] = "http2and3"
+
+        if distroConfig['DistributionConfig']['Comment'] == "":
+            distroConfig['DistributionConfig']['Comment'] = "FIXME - You should really have a description for what this cloudfront does!"
+
+        if distroConfig['DistributionConfig']['Logging']['Enabled'] == False:
+            distroConfig['DistributionConfig']['Logging']['Enabled'] = True
+            distroConfig['DistributionConfig']['Logging']['IncludeCookies'] = True
+            distroConfig['DistributionConfig']['Logging']['Bucket'] = event['LoggingBucket']+'.s3.amazonaws.com'
+            distroConfig['DistributionConfig']['Logging']['Prefix'] = AwsAccountId+"/"
+            print(f"Set logging to bucket to {event['LoggingBucket']}")
+
+        if 'Id' not in distroConfig:
+            distroConfig['Id'] = distributionId
+
+
+        printObject = printJson(distroConfig) if DEBUG is True else None
+        
+        response = cloudfrontClient.update_distribution(**distroConfig)
+        return {
+            'message': 'Cloudfront logging and other defaults set',
+            'status': 'RESOLVED'
+        }
 
   return {
         'message': 'UNKNOWN Service requested for logging - IGNORED',
         'status': 'ERROR'
   }
 
+def printJson(object):
+    json_formatted_str = json.dumps(object, indent=2)
+    print(json_formatted_str)
+    return
 
 def setupAPIGatewayAccountSettings(AwsAccountId, apigwclient):
     response = apigwclient.get_account()
@@ -363,10 +455,10 @@ def createLogGroup(logGroupName, region, AwsAccountId):
 
 if __name__ == "__main__":
     event = {
-       #"ResourceId": "arn:aws:elasticloadbalancing:us-east-1:924746602103:loadbalancer/app/XPVA-SYNAPS-SYNAPS-DEV1/a14b93bcfe33d728",
-       "ResourceId": "arn:aws:apigateway:us-east-1::/apis/b8snwl9re7/stages/default",
-       "ResourceType": "AwsApiGatewayV2Stage",
-       "AccountId": "234772128127",
+       "ResourceId": "arn:aws:cloudfront::619391186421:distribution/E32G6YNRXCGN90",
+       "LoggingBucket": "sharr-logging-cloudfront-619391186421-us-east-1",
+       "ResourceType": "AwsCloudFrontDistribution",
+       "AccountId": "619391186421",
        "Region": "us-east-1",
     }
     result = runbook_handler(event,"")
