@@ -1,6 +1,7 @@
-https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.1.cnxc.5/aws-sharr-deploy.template
-https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.1.cnxc.5/aws-sharr-member.template
-https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.1.cnxc.5/aws-sharr-member-roles.template
+https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.1.cnxc.6/aws-sharr-deploy.template
+https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.1.cnxc.6/aws-sharr-member.template
+
+https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.1.cnxc.6/aws-sharr-member-roles.template
 
 
 AWSControlTower-SHARR-MemberRoles
