@@ -18,7 +18,7 @@ export class EnableVPCFlowLogsDocument extends ControlRunbookDocument {
       scope: RemediationScope.REGIONAL,
       resourceIdName: 'VPC',
       resourceIdRegex: String.raw`^arn:(?:aws|aws-cn|aws-us-gov):ec2:.*:\d{12}:vpc\/(vpc-[0-9a-f]{8,17})$`,
-      updateDescription: HardCodedString.of('Removed rules on default security group'),
+      updateDescription: HardCodedString.of('Enabled VPC FlowLogs'),
     });
   }
 
