@@ -270,7 +270,7 @@ def runbook_handler(event, context):
 
 if __name__ == "__main__":
     event = {
-       "ResourceId": "arn:aws:elasticloadbalancing:us-east-1:924746602103:loadbalancer/app/XPVA-SYNAPS-SYNAPS-DEV1/a14b93bcfe33d728",
+       "ResourceId": "arn:aws:elasticloadbalancing:us-east-1:455768319323:loadbalancer/app/Redirect-External-XPR/ef0ecc1f69dbbca2",
     }
     result = runbook_handler(event,"")
     print(result)

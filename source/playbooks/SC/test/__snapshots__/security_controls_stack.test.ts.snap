@@ -501,6 +501,14 @@ exports[`member stack 1`] = `
         "Available",
       ],
     },
+    "ControlRunbooksEnableELB5Condition8645CF77": {
+      "Fn::Equals": [
+        {
+          "Ref": "ControlRunbooksEnableELB5B85F98AE",
+        },
+        "Available",
+      ],
+    },
     "ControlRunbooksEnableIAM18ConditionC6288150": {
       "Fn::Equals": [
         {
@@ -914,6 +922,15 @@ exports[`member stack 1`] = `
       ],
       "Default": "Available",
       "Description": "Enable/disable availability of remediation for pci-dss version 3.2.1 Control EC2.7 in Security Hub Console Custom Actions. If NOT Available the remediation cannot be triggered from the Security Hub console in the Security Hub Admin account.",
+      "Type": "String",
+    },
+    "ControlRunbooksEnableELB5B85F98AE": {
+      "AllowedValues": [
+        "Available",
+        "NOT Available",
+      ],
+      "Default": "Available",
+      "Description": "Enable/disable availability of remediation for pci-dss version 3.2.1 Control ELB.5 in Security Hub Console Custom Actions. If NOT Available the remediation cannot be triggered from the Security Hub console in the Security Hub Admin account.",
       "Type": "String",
     },
     "ControlRunbooksEnableIAM18A4548D88": {
@@ -8523,6 +8540,358 @@ def parse_event(event, _):
       },
       "Type": "AWS::SSM::Document",
     },
+    "ControlRunbooksELB5ABDA5479": {
+      "Condition": "ControlRunbooksEnableELB5Condition8645CF77",
+      "DependsOn": [
+        "CreateWait4",
+      ],
+      "Properties": {
+        "Content": {
+          "assumeRole": "{{ AutomationAssumeRole }}",
+          "description": "### Document Name - ASR-AFSBP_1.0.0_ELB.5
+## What does this document do?
+APPLIES OPINIONATED STANDARDS AND LOGGING TO LOAD BALANCERS
+
+## Input Parameters
+* Finding: (Required) Security Hub finding details JSON
+* AutomationAssumeRole: (Required) The ARN of the role that allows Automation to perform the actions on your behalf.
+
+## Documentation Links
+* [AFSBP ELB.5](https://docs.aws.amazon.com/securityhub/latest/userguide/elb-controls.html#elb-5)
+",
+          "mainSteps": [
+            {
+              "action": "aws:executeScript",
+              "inputs": {
+                "Handler": "parse_event",
+                "InputPayload": {
+                  "Finding": "{{ Finding }}",
+                  "expected_control_id": [
+                    "ELB.5",
+                  ],
+                  "parse_id_pattern": "(.*)$",
+                },
+                "Runtime": "python3.8",
+                "Script": "# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+import re
+import json
+import boto3
+from botocore.config import Config
+
+def connect_to_config(boto_config):
+    return boto3.client('config', config=boto_config)
+
+def connect_to_ssm(boto_config):
+    return boto3.client('ssm', config=boto_config)
+
+def get_solution_id():
+    return 'SO0111'
+
+def get_solution_version():
+    ssm = connect_to_ssm(
+        Config(
+            retries = {
+                'mode': 'standard'
+            },
+            user_agent_extra = f'AwsSolution/{get_solution_id()}/unknown'
+        )
+    )
+    solution_version = 'unknown'
+    try:
+        ssm_parm_value = ssm.get_parameter(
+            Name=f'/Solutions/{get_solution_id()}/member-version'
+        )['Parameter'].get('Value', 'unknown')
+        solution_version = ssm_parm_value
+    except Exception as e:
+        print(e)
+        print(f'ERROR getting solution version')
+    return solution_version
+
+def get_shortname(long_name):
+    short_name = {
+        'aws-foundational-security-best-practices': 'AFSBP',
+        'cis-aws-foundations-benchmark': 'CIS',
+        'pci-dss': 'PCI',
+        'security-control': 'SC'
+    }
+    return short_name.get(long_name, None)
+
+def get_config_rule(rule_name):
+    boto_config = Config(
+        retries = {
+            'mode': 'standard'
+        },
+        user_agent_extra = f'AwsSolution/{get_solution_id()}/{get_solution_version()}'
+    )
+    config_rule = None
+    try:
+        configsvc = connect_to_config(boto_config)
+        config_rule = configsvc.describe_config_rules(
+            ConfigRuleNames=[ rule_name ]
+        ).get('ConfigRules', [])[0]
+    except Exception as e:
+        print(e)
+        exit(f'ERROR getting config rule {rule_name}')
+    return config_rule
+
+class FindingEvent:
+    """
+    Finding object returns the parse fields from an input finding json object
+    """
+    def _get_resource_id(self, parse_id_pattern, resource_index):
+        identifier_raw = self.finding_json['Resources'][0]['Id']
+        self.resource_id = identifier_raw
+        self.resource_id_matches = []
+
+        if parse_id_pattern:
+            identifier_match = re.match(
+                parse_id_pattern,
+                identifier_raw
+            )
+
+            if identifier_match:
+                for group in range(1, len(identifier_match.groups())+1):
+                    self.resource_id_matches.append(identifier_match.group(group))
+                self.resource_id = identifier_match.group(resource_index)
+            else:
+                exit(f'ERROR: Invalid resource Id {identifier_raw}')
+    
+    def _get_sc_check(self):
+        match_finding_id = re.match(
+            r'^arn:(?:aws|aws-cn|aws-us-gov):securityhub:(?:[a-z]{2}(?:-gov)?-[a-z]+-\\d):\\d{12}:'+
+            'security-control/(.*)/finding/(?i:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$',
+            self.finding_json['Id']
+        )
+        if match_finding_id:
+            self.standard_id = get_shortname('security-control')
+            self.control_id = match_finding_id.group(1)
+
+        return match_finding_id
+
+    def _get_standard_info(self):
+        match_finding_id = re.match(
+            r'^arn:(?:aws|aws-cn|aws-us-gov):securityhub:(?:[a-z]{2}(?:-gov)?-[a-z]+-\\d):\\d{12}:'+
+            'subscription/(.*?)/v/(\\d+\\.\\d+\\.\\d+)/(.*)/finding/(?i:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$',
+            self.finding_json['Id']
+        )
+        if match_finding_id:
+            self.standard_id = get_shortname(match_finding_id.group(1))
+            self.standard_version = match_finding_id.group(2)
+            self.control_id = match_finding_id.group(3)
+        else:
+            match_sc_finding_id = self._get_sc_check()
+            if not match_sc_finding_id:
+                self.valid_finding = False
+                self.invalid_finding_reason = f'Finding Id is invalid: {self.finding_json["Id"]}'
+
+    def _get_aws_config_rule(self):
+        # config_rule_id refers to the AWS Config Rule that produced the finding
+        if "RelatedAWSResources:0/type" in self.finding_json['ProductFields'] and self.finding_json['ProductFields']['RelatedAWSResources:0/type'] == 'AWS::Config::ConfigRule':
+            self.aws_config_rule_id = self.finding_json['ProductFields']['RelatedAWSResources:0/name']
+            self.aws_config_rule = get_config_rule(self.aws_config_rule_id)
+
+    def _get_region_from_resource_id(self):
+        check_for_region = re.match(
+            r'^arn:(?:aws|aws-cn|aws-us-gov):[a-zA-Z0-9]+:([a-z]{2}(?:-gov)?-[a-z]+-\\d):.*:.*$',
+            self.finding_json['Resources'][0]['Id']
+        )
+        if check_for_region:
+            self.resource_region = check_for_region.group(1)
+
+    def __init__(self, finding_json, parse_id_pattern, expected_control_id, resource_index):
+        self.valid_finding = True
+        self.resource_region = None
+        self.control_id = None
+        self.aws_config_rule_id = None
+        self.aws_config_rule = {}
+
+        """Populate fields"""
+        # v1.5
+        self.finding_json = finding_json
+        self._get_resource_id(parse_id_pattern, resource_index)     # self.resource_id, self.resource_id_matches
+        self._get_standard_info()                                   # self.standard_id, self.standard_version, self.control_id
+
+        # V1.4
+        self.account_id = self.finding_json.get('AwsAccountId', None)    # deprecate - get Finding.AwsAccountId
+        if not re.match(r'^\\d{12}$', self.account_id) and self.valid_finding:
+            self.valid_finding = False
+            self.invalid_finding_reason = f'AwsAccountId is invalid: {self.account_id}'
+        self.finding_id = self.finding_json.get('Id', None)              # deprecate
+        self.product_arn = self.finding_json.get('ProductArn', None)
+        if not re.match(r'^arn:(?:aws|aws-cn|aws-us-gov):securityhub:[a-z]{2}(?:-gov)?-[a-z]+-\\d::product/aws/securityhub$', self.product_arn):
+            if self.valid_finding:
+                self.valid_finding = False
+                self.invalid_finding_reason = f'ProductArn is invalid: {self.product_arn}'
+        self.details = self.finding_json['Resources'][0].get('Details', {})
+        # Test mode is used with fabricated finding data to tell the
+        # remediation runbook to run in test more (where supported)
+        # Currently not widely-used and perhaps should be deprecated.
+        self.testmode = bool('testmode' in self.finding_json)
+        self.resource = self.finding_json['Resources'][0]
+        self._get_region_from_resource_id()
+        self._get_aws_config_rule()
+        self.affected_object = {'Type': self.resource['Type'], 'Id': self.resource_id, 'OutputKey': 'Remediation.Output'}
+
+        # Validate control_id
+        if not self.control_id:
+            if self.valid_finding:
+                self.valid_finding = False
+                self.invalid_finding_reason = f'Finding Id is invalid: {self.finding_json["Id"]} - missing Control Id'
+        elif self.control_id not in expected_control_id:  # ControlId is the expected value
+            if self.valid_finding:
+                self.valid_finding = False
+                self.invalid_finding_reason = f'Control Id from input ({self.control_id}) does not match {str(expected_control_id)}'
+
+        if not self.resource_id and self.valid_finding:
+            self.valid_finding = False
+            self.invalid_finding_reason = 'Resource Id is missing from the finding json Resources (Id)'
+
+        if not self.valid_finding:
+            # Error message and return error data
+            msg = f'ERROR: {self.invalid_finding_reason}'
+            exit(msg)
+
+    def __str__(self):
+        return json.dumps(self.__dict__)
+
+'''
+MAIN
+'''
+def parse_event(event, _):
+    finding_event = FindingEvent(event['Finding'], event['parse_id_pattern'], event['expected_control_id'], event.get('resource_index', 1))
+
+    if not finding_event.valid_finding:
+        exit('ERROR: Finding is not valid')
+
+    return {
+        "account_id": finding_event.account_id,
+        "resource_id": finding_event.resource_id,
+        "finding_id": finding_event.finding_id,         # Deprecate v1.5.0+
+        "control_id": finding_event.control_id,
+        "product_arn": finding_event.product_arn,       # Deprecate v1.5.0+
+        "object": finding_event.affected_object,
+        "matches": finding_event.resource_id_matches,
+        "details": finding_event.details,               # Deprecate v1.5.0+
+        "testmode": finding_event.testmode,             # Deprecate v1.5.0+
+        "resource": finding_event.resource,
+        "resource_region": finding_event.resource_region,
+        "finding": finding_event.finding_json,
+        "aws_config_rule": finding_event.aws_config_rule
+    }
+",
+              },
+              "name": "ParseInput",
+              "outputs": [
+                {
+                  "Name": "FindingId",
+                  "Selector": "$.Payload.finding_id",
+                  "Type": "String",
+                },
+                {
+                  "Name": "ProductArn",
+                  "Selector": "$.Payload.product_arn",
+                  "Type": "String",
+                },
+                {
+                  "Name": "AffectedObject",
+                  "Selector": "$.Payload.object",
+                  "Type": "StringMap",
+                },
+                {
+                  "Name": "ResourceId",
+                  "Selector": "$.Payload.resource_id",
+                  "Type": "String",
+                },
+                {
+                  "Name": "Region",
+                  "Selector": "$.Payload.resource.Region",
+                  "Type": "String",
+                },
+                {
+                  "Name": "AccountId",
+                  "Selector": "$.Payload.account_id",
+                  "Type": "String",
+                },
+                {
+                  "Name": "ResourceType",
+                  "Selector": "$.Payload.object.Type",
+                  "Type": "String",
+                },
+              ],
+            },
+            {
+              "action": "aws:executeAutomation",
+              "inputs": {
+                "DocumentName": "ASR-EnableLoadBalancerLogging",
+                "RuntimeParameters": {
+                  "AccountId": "{{ ParseInput.AccountId }}",
+                  "AutomationAssumeRole": "arn:{{ global:AWS_PARTITION }}:iam::{{ global:ACCOUNT_ID }}:role/{{ RemediationRoleName }}",
+                  "Region": "{{ ParseInput.Region }}",
+                  "ResourceId": "{{ ParseInput.ResourceId }}",
+                  "ResourceType": "{{ ParseInput.ResourceType }}",
+                },
+              },
+              "name": "Remediation",
+            },
+            {
+              "action": "aws:executeAwsApi",
+              "inputs": {
+                "Api": "BatchUpdateFindings",
+                "FindingIdentifiers": [
+                  {
+                    "Id": "{{ ParseInput.FindingId }}",
+                    "ProductArn": "{{ ParseInput.ProductArn }}",
+                  },
+                ],
+                "Note": {
+                  "Text": "Enabled Load Balancer Logging",
+                  "UpdatedBy": "ASR-PCI_3.2.1_ELB.5",
+                },
+                "Service": "securityhub",
+                "Workflow": {
+                  "Status": "RESOLVED",
+                },
+              },
+              "isEnd": true,
+              "name": "UpdateFinding",
+            },
+          ],
+          "outputs": [
+            "Remediation.Output",
+            "ParseInput.AffectedObject",
+          ],
+          "parameters": {
+            "AutomationAssumeRole": {
+              "allowedPattern": "^arn:(?:aws|aws-us-gov|aws-cn):iam::\\d{12}:role\\/[\\w+=,.@-]+$",
+              "description": "(Required) The ARN of the role that allows Automation to perform the actions on your behalf.",
+              "type": "String",
+            },
+            "Finding": {
+              "description": "The input from the Orchestrator Step function for the ELB.5 finding",
+              "type": "StringMap",
+            },
+            "RemediationRoleName": {
+              "allowedPattern": "^[\\w+=,.@-]+$",
+              "default": "SO0111-EnableLoadBalancerLogging",
+              "type": "String",
+            },
+          },
+          "schemaVersion": "0.3",
+        },
+        "DocumentFormat": "YAML",
+        "DocumentType": "Automation",
+        "Name": "ASR-PCI_3.2.1_ELB.5",
+        "Tags": [
+          {
+            "Key": "CdkGenerated",
+            "Value": "true",
+          },
+        ],
+        "UpdateMethod": "NewVersion",
+      },
+      "Type": "AWS::SSM::Document",
+    },
     "ControlRunbooksIAM18ACE62321": {
       "Condition": "ControlRunbooksEnableIAM18ConditionC6288150",
       "DependsOn": [
@@ -8858,7 +9227,7 @@ def parse_event(event, _):
     "ControlRunbooksIAM2280FCB95D": {
       "Condition": "ControlRunbooksEnableIAM22Condition387158E7",
       "DependsOn": [
-        "CreateWait4",
+        "CreateWait5",
       ],
       "Properties": {
         "Content": {
@@ -10958,7 +11327,7 @@ def parse_event(event, _):
     "ControlRunbooksRDS13FCEA51BD": {
       "Condition": "ControlRunbooksEnableRDS13Condition0E8A44B3",
       "DependsOn": [
-        "CreateWait6",
+        "CreateWait7",
       ],
       "Properties": {
         "Content": {
@@ -12398,7 +12767,7 @@ def parse_event(event, _):
     "ControlRunbooksRDS4C82F2410": {
       "Condition": "ControlRunbooksEnableRDS4Condition2E89346E",
       "DependsOn": [
-        "CreateWait5",
+        "CreateWait6",
       ],
       "Properties": {
         "Content": {
@@ -15450,7 +15819,7 @@ def check_for_s3_bucket_name(_, __):
     "ControlRunbooksRedshift658631424": {
       "Condition": "ControlRunbooksEnableRedshift6Condition5A51FC97",
       "DependsOn": [
-        "CreateWait7",
+        "CreateWait8",
       ],
       "Properties": {
         "Content": {
@@ -17225,7 +17594,7 @@ def parse_event(event, _):
     "ControlRunbooksS360762680A": {
       "Condition": "ControlRunbooksEnableS36ConditionD22273E2",
       "DependsOn": [
-        "CreateWait8",
+        "CreateWait9",
       ],
       "Properties": {
         "Content": {
@@ -18593,15 +18962,20 @@ def parse_event(event, _):
                   "Selector": "$.Payload.resource_region",
                   "Type": "String",
                 },
+                {
+                  "Name": "Region",
+                  "Selector": "$.Payload.resource.Region",
+                  "Type": "String",
+                },
               ],
             },
             {
               "action": "aws:executeAutomation",
               "inputs": {
-                "DocumentName": "ASR-EnableDeliveryLoggingForSNSTopic",
+                "DocumentName": "ASR-EnableSNSDeliveryLogging",
                 "RuntimeParameters": {
                   "AutomationAssumeRole": "arn:{{ global:AWS_PARTITION }}:iam::{{ global:ACCOUNT_ID }}:role/{{ RemediationRoleName }}",
-                  "LoggingRole": "{{ LoggingRole }}",
+                  "Region": "{{ ParseInput.Region }}",
                   "SNSTopicArn": "{{ ParseInput.SNSTopicArn }}",
                 },
                 "TargetLocations": [
@@ -18655,14 +19029,9 @@ def parse_event(event, _):
               "description": "The input from the Orchestrator Step function for the SNS.2 finding",
               "type": "StringMap",
             },
-            "LoggingRole": {
-              "allowedPattern": "^arn:(?:aws|aws-us-gov|aws-cn):iam::\\d{12}:role/[\\w+=,.@-]+$",
-              "default": "{{ssm:/Solutions/SO0111/DeliveryStatusLoggingRole}}",
-              "type": "String",
-            },
             "RemediationRoleName": {
               "allowedPattern": "^[\\w+=,.@-]+$",
-              "default": "SO0111-EnableDeliveryLoggingForSNSTopic",
+              "default": "SO0111-EnableSNSDeliveryLogging",
               "type": "String",
             },
           },
@@ -19120,7 +19489,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "b7e97ca0f070c6360ea80558213f5cf2ebf3561f3b8b1ac948846581c43e97d3",
+        "DocumentPropertiesHash": "b3249c0f305b395fcc8b2b5a134537e29467d710e30a99589c6b5447927cf96a",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -19137,7 +19506,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "8f7c5f56862771c4548165a67ac47517f21777f5cf7ee23e9b7b0f5aa3a364a2",
+        "DocumentPropertiesHash": "b022d667f5cc717e83a4d6bb0a5016f1260040c38a88a7791253e787ddf0e7df",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -19154,7 +19523,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "e77fa52a0ca342dbfb86409abea49d2243ca46740d79b615ea9dc0618da3ad6e",
+        "DocumentPropertiesHash": "8edfaf3fe07302226f8e2425f1f19dcb7833ac5afbb06c36c3a0a2ccecb0a861",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -19171,7 +19540,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "b34df59968b49f9824c6b6560d6901e1666d1e75fb0ab85bc7b74e97838e11db",
+        "DocumentPropertiesHash": "64fd30d24f49c3d85bf2a9b499ecdf620d897de46b00d6b304f46879ec46151f",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -19188,7 +19557,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "5e53fc7abb1c81c81ab08e6a78360e7fdbca399b31fa2f4647bb43cf568ecfa9",
+        "DocumentPropertiesHash": "ab31bfed9c89d10ab01062ab51cedbf072daf1637132b858cd4dd5db4e0c4439",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -19205,7 +19574,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "2c2be4dfd80b26e5a11e13419ced3a8641214ac2dfa566ff6b7e32592fc0dd42",
+        "DocumentPropertiesHash": "6157d4d23198aee9c5c22a14f6a208f9f9707a3623cd1c320dd9fa5992e7ad2f",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -19294,7 +19663,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "b7e97ca0f070c6360ea80558213f5cf2ebf3561f3b8b1ac948846581c43e97d3",
+        "DocumentPropertiesHash": "b3249c0f305b395fcc8b2b5a134537e29467d710e30a99589c6b5447927cf96a",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -19312,7 +19681,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "8f7c5f56862771c4548165a67ac47517f21777f5cf7ee23e9b7b0f5aa3a364a2",
+        "DocumentPropertiesHash": "b022d667f5cc717e83a4d6bb0a5016f1260040c38a88a7791253e787ddf0e7df",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -19330,7 +19699,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "e77fa52a0ca342dbfb86409abea49d2243ca46740d79b615ea9dc0618da3ad6e",
+        "DocumentPropertiesHash": "8edfaf3fe07302226f8e2425f1f19dcb7833ac5afbb06c36c3a0a2ccecb0a861",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -19348,7 +19717,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "b34df59968b49f9824c6b6560d6901e1666d1e75fb0ab85bc7b74e97838e11db",
+        "DocumentPropertiesHash": "64fd30d24f49c3d85bf2a9b499ecdf620d897de46b00d6b304f46879ec46151f",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -19366,7 +19735,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "5e53fc7abb1c81c81ab08e6a78360e7fdbca399b31fa2f4647bb43cf568ecfa9",
+        "DocumentPropertiesHash": "ab31bfed9c89d10ab01062ab51cedbf072daf1637132b858cd4dd5db4e0c4439",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -19384,7 +19753,7 @@ def parse_event(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "2c2be4dfd80b26e5a11e13419ced3a8641214ac2dfa566ff6b7e32592fc0dd42",
+        "DocumentPropertiesHash": "6157d4d23198aee9c5c22a14f6a208f9f9707a3623cd1c320dd9fa5992e7ad2f",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -19595,20 +19964,20 @@ def parse_event(event, _):
     },
     "Gate4": {
       "Metadata": {
+        "ControlRunbooksELB5ABDA5479Ready": {
+          "Fn::If": [
+            "ControlRunbooksEnableELB5Condition8645CF77",
+            {
+              "Ref": "ControlRunbooksELB5ABDA5479",
+            },
+            "",
+          ],
+        },
         "ControlRunbooksIAM18ACE62321Ready": {
           "Fn::If": [
             "ControlRunbooksEnableIAM18ConditionC6288150",
             {
               "Ref": "ControlRunbooksIAM18ACE62321",
-            },
-            "",
-          ],
-        },
-        "ControlRunbooksIAM2280FCB95DReady": {
-          "Fn::If": [
-            "ControlRunbooksEnableIAM22Condition387158E7",
-            {
-              "Ref": "ControlRunbooksIAM2280FCB95D",
             },
             "",
           ],
@@ -19645,6 +20014,15 @@ def parse_event(event, _):
     },
     "Gate5": {
       "Metadata": {
+        "ControlRunbooksIAM2280FCB95DReady": {
+          "Fn::If": [
+            "ControlRunbooksEnableIAM22Condition387158E7",
+            {
+              "Ref": "ControlRunbooksIAM2280FCB95D",
+            },
+            "",
+          ],
+        },
         "ControlRunbooksKMS41A22BB8DReady": {
           "Fn::If": [
             "ControlRunbooksEnableKMS4Condition710C0C5C",
@@ -19681,25 +20059,16 @@ def parse_event(event, _):
             "",
           ],
         },
-        "ControlRunbooksRDS4C82F2410Ready": {
-          "Fn::If": [
-            "ControlRunbooksEnableRDS4Condition2E89346E",
-            {
-              "Ref": "ControlRunbooksRDS4C82F2410",
-            },
-            "",
-          ],
-        },
       },
       "Type": "AWS::CloudFormation::WaitConditionHandle",
     },
     "Gate6": {
       "Metadata": {
-        "ControlRunbooksRDS13FCEA51BDReady": {
+        "ControlRunbooksRDS4C82F2410Ready": {
           "Fn::If": [
-            "ControlRunbooksEnableRDS13Condition0E8A44B3",
+            "ControlRunbooksEnableRDS4Condition2E89346E",
             {
-              "Ref": "ControlRunbooksRDS13FCEA51BD",
+              "Ref": "ControlRunbooksRDS4C82F2410",
             },
             "",
           ],
@@ -19745,6 +20114,15 @@ def parse_event(event, _):
     },
     "Gate7": {
       "Metadata": {
+        "ControlRunbooksRDS13FCEA51BDReady": {
+          "Fn::If": [
+            "ControlRunbooksEnableRDS13Condition0E8A44B3",
+            {
+              "Ref": "ControlRunbooksRDS13FCEA51BD",
+            },
+            "",
+          ],
+        },
         "ControlRunbooksRDS16EB04DCBFReady": {
           "Fn::If": [
             "ControlRunbooksEnableRDS16ConditionCB5C3E8F",
@@ -19781,6 +20159,11 @@ def parse_event(event, _):
             "",
           ],
         },
+      },
+      "Type": "AWS::CloudFormation::WaitConditionHandle",
+    },
+    "Gate8": {
+      "Metadata": {
         "ControlRunbooksRedshift658631424Ready": {
           "Fn::If": [
             "ControlRunbooksEnableRedshift6Condition5A51FC97",
@@ -19790,11 +20173,6 @@ def parse_event(event, _):
             "",
           ],
         },
-      },
-      "Type": "AWS::CloudFormation::WaitConditionHandle",
-    },
-    "Gate8": {
-      "Metadata": {
         "ControlRunbooksS311C5AAD45Ready": {
           "Fn::If": [
             "ControlRunbooksEnableS31Condition25C33B3F",
@@ -19831,6 +20209,11 @@ def parse_event(event, _):
             "",
           ],
         },
+      },
+      "Type": "AWS::CloudFormation::WaitConditionHandle",
+    },
+    "Gate9": {
+      "Metadata": {
         "ControlRunbooksS360762680AReady": {
           "Fn::If": [
             "ControlRunbooksEnableS36ConditionD22273E2",
@@ -19840,11 +20223,6 @@ def parse_event(event, _):
             "",
           ],
         },
-      },
-      "Type": "AWS::CloudFormation::WaitConditionHandle",
-    },
-    "Gate9": {
-      "Metadata": {
         "ControlRunbooksS394FBE32FAReady": {
           "Fn::If": [
             "ControlRunbooksEnableS39Condition7705D6AD",

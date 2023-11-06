@@ -24,7 +24,7 @@ def runbook_handler(event, context):
   
   loggingBucket = 'sharr-logging-' + serviceName + '-' + AwsAccountId + '-' + region.lower()
 
-  if serviceName == 'elb':
+  if ResourceType == 'AwsElbv2LoadBalancer':
     client = boto3.client('elbv2', region_name = region)
     try:
         client.modify_load_balancer_attributes(
@@ -455,10 +455,10 @@ def createLogGroup(logGroupName, region, AwsAccountId):
 
 if __name__ == "__main__":
     event = {
-       "ResourceId": "arn:aws:cloudfront::619391186421:distribution/E32G6YNRXCGN90",
-       "LoggingBucket": "sharr-logging-cloudfront-619391186421-us-east-1",
-       "ResourceType": "AwsCloudFrontDistribution",
-       "AccountId": "619391186421",
+       "ResourceId": "arn:aws:elasticloadbalancing:us-east-1:455768319323:loadbalancer/app/i-coreOps-proxy-lb/1533f03526fc680f",
+       "LoggingBucket": "sharr-logging-elb-455768319323-us-east-1",
+       "ResourceType": "AwsElbv2LoadBalancer",
+       "AccountId": "455768319323",
        "Region": "us-east-1",
     }
     result = runbook_handler(event,"")
