@@ -1516,6 +1516,12 @@ export class RemediationRunbookStack extends cdk.Stack {
       remediationPolicy2.addResources('*');
       inlinePolicy.addStatements(remediationPolicy2);
 
+      const remediationPolicy3 = new PolicyStatement();
+      remediationPolicy3.addActions('elasticloadbalancing:*');
+      remediationPolicy3.effect = Effect.ALLOW;
+      remediationPolicy3.addResources('*');
+      inlinePolicy.addStatements(remediationPolicy3);
+
       new SsmRole(props.roleStack, 'RemediationRole ' + remediationName, {
         solutionId: props.solutionId,
         ssmDocName: remediationName,
