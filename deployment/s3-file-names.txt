@@ -1,7 +1,6 @@
-https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.2.cnxc.1/aws-sharr-deploy.template
-https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.2.cnxc.1/aws-sharr-member.template
-
-https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.2.cnxc.1/aws-sharr-member-roles.template
+https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.2.cnxc.2/aws-sharr-deploy.template
+https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.2.cnxc.2/aws-sharr-member.template
+https://sharr-deploy-reference.s3.amazonaws.com/aws-security-hub-automated-response-and-remediation/v2.0.2.cnxc.2/aws-sharr-member-roles.template
 
 
 AWSControlTower-SHARR-MemberRoles
@@ -11,6 +10,7 @@ SO0111-SHARR-Orchestrator-Admin
 aws-foundational-security-best-practices/v/1.0.0/S3.9
 ASR-AFSBP_1.0.0_S3
 
+SH 332241576022
 ARCH 802214760415
 
                 
