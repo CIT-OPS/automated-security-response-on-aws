@@ -7,6 +7,7 @@ import { CfnCondition, CfnParameter, Fn } from 'aws-cdk-lib';
 
 import * as autoscaling_1 from '../ssmdocs/SC_AutoScaling.1';
 import * as apigateway_1 from '../ssmdocs/SC_APIGateway.1';   // CNXC
+import * as apigateway_4 from '../ssmdocs/SC_APIGateway.4';   // CNXC
 import * as cloudformation_1 from '../ssmdocs/SC_CloudFormation.1';
 import * as cloudfront_1 from '../ssmdocs/SC_CloudFront.1';
 import * as cloudtrail_1 from '../ssmdocs/SC_CloudTrail.1';
@@ -55,6 +56,7 @@ import * as s3_9 from '../ssmdocs/SC_S3.9'; // CNXC
 import * as sqs_1 from '../ssmdocs/SC_SQS.1';
 import * as sns_1 from '../ssmdocs/SC_SNS.1';
 import * as sns_2 from '../ssmdocs/SC_SNS.2';
+import * as stepfunctions_1 from '../ssmdocs/SC_StepFunctions.1'
 
 export interface PlaybookProps {
   standardShortName: string;
@@ -79,6 +81,7 @@ export class ControlRunbooks extends Construct {
 
     this.add(autoscaling_1.createControlRunbook(this, 'AutoScaling.1', props));
     this.add(apigateway_1.createControlRunbook(this, 'APIGateway.1', props));
+    this.add(apigateway_4.createControlRunbook(this, 'APIGateway.4', props));
     this.add(cloudformation_1.createControlRunbook(this, 'CloudFormation.1', props));
     this.add(cloudfront_1.createControlRunbook(this, 'CloudFront.1', props));
     this.add(cloudtrail_1.createControlRunbook(this, 'CloudTrail.1', props));
@@ -127,6 +130,7 @@ export class ControlRunbooks extends Construct {
     this.add(sqs_1.createControlRunbook(this, 'SQS.1', props));
     this.add(sns_1.createControlRunbook(this, 'SNS.1', props));
     this.add(sns_2.createControlRunbook(this, 'SNS.2', props));
+    this.add(stepfunctions_1.createControlRunbook(this, 'StepFunctions.1', props));
   }
 
   protected add(document: ControlRunbookDocument) {

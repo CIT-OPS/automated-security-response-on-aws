@@ -27,7 +27,7 @@ echo "[Init] Sync Global"
 echo "------------------------------------------------------------------------------"
 do_cmd aws s3 sync ./global-s3-assets/ s3://sharr-deploy-reference/aws-security-hub-automated-response-and-remediation/$release --delete --acl bucket-owner-full-control
 
-regions=( "us-east-1" "us-east-2" "us-west-1" "us-west-2" "ap-southeast-2" "ca-central-1" "eu-west-2" )
+regions=( "us-east-1" "us-east-2" "us-west-1" "us-west-2" "ap-southeast-2" "ca-central-1" "eu-west-2" "ap-southeast-1")
 for i in "${regions[@]}"
 do
    : 

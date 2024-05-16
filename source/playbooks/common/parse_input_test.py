@@ -214,10 +214,10 @@ def main():
     "Types": [
       "Software and Configuration Checks/Industry and Regulatory Standards"
     ],
-    "Description": "This control checks whether point-in-time recovery (PITR) is enabled for a DynamoDB table.",
+    "Description": "This control checks to see if server access logging is enabled on Amazon CloudFront Distributions. The control will fail if access logging is not enabled for the distribution.",
     "Compliance": {
       "Status": "FAILED",
-      "SecurityControlId": "DynamoDB.2",
+      "SecurityControlId": "CloudFront.5",
       "AssociatedStandards": [
         {
           "StandardsId": "standards/aws-foundational-security-best-practices/v/1.0.0"
@@ -225,9 +225,9 @@ def main():
       ]
     },
     "ProductName": "Security Hub",
-    "FirstObservedAt": "2023-09-05T23:42:00.140Z",
-    "CreatedAt": "2023-09-05T23:42:00.140Z",
-    "LastObservedAt": "2023-09-05T23:42:14.825Z",
+    "FirstObservedAt": "2023-11-28T05:02:51.291Z",
+    "CreatedAt": "2023-11-28T05:02:51.291Z",
+    "LastObservedAt": "2023-11-29T03:55:06.921Z",
     "CompanyName": "AWS",
     "FindingProviderFields": {
       "Types": [
@@ -240,23 +240,23 @@ def main():
       }
     },
     "ProductFields": {
-      "RelatedAWSResources:0/name": "securityhub-dynamodb-pitr-enabled-ae09b360",
+      "RelatedAWSResources:0/name": "securityhub-cloudfront-accesslogs-enabled-e974c8e4",
       "RelatedAWSResources:0/type": "AWS::Config::ConfigRule",
       "aws/securityhub/ProductName": "Security Hub",
       "aws/securityhub/CompanyName": "AWS",
-      "Resources:0/Id": "arn:aws:dynamodb:us-east-1:332241576022:table/test_delete_me",
-      "aws/securityhub/FindingId": "arn:aws:securityhub:us-east-1::product/aws/securityhub/arn:aws:securityhub:us-east-1:332241576022:security-control/DynamoDB.2/finding/a6a913d6-24db-4554-aa79-9c4fa457e6c8"
+      "Resources:0/Id": "arn:aws:cloudfront::341481277192:distribution/E1OH9JMPDVD94Y",
+      "aws/securityhub/FindingId": "arn:aws:securityhub:us-east-1::product/aws/securityhub/arn:aws:securityhub:us-east-1:341481277192:security-control/CloudFront.5/finding/234b035d-4a45-4732-bc50-0cf3f38cec79"
     },
     "Remediation": {
       "Recommendation": {
         "Text": "For information on how to correct this issue, consult the AWS Security Hub controls documentation.",
-        "Url": "https://docs.aws.amazon.com/console/securityhub/DynamoDB.2/remediation"
+        "Url": "https://docs.aws.amazon.com/console/securityhub/CloudFront.5/remediation"
       }
     },
     "SchemaVersion": "2018-10-08",
-    "GeneratorId": "security-control/DynamoDB.2",
+    "GeneratorId": "security-control/CloudFront.5",
     "RecordState": "ACTIVE",
-    "Title": "DynamoDB tables should have point-in-time recovery enabled",
+    "Title": "CloudFront distributions should have logging enabled",
     "Workflow": {
       "Status": "NEW"
     },
@@ -265,41 +265,89 @@ def main():
       "Label": "MEDIUM",
       "Original": "MEDIUM"
     },
-    "UpdatedAt": "2023-09-05T23:42:00.140Z",
+    "UpdatedAt": "2023-11-29T03:54:53.662Z",
     "WorkflowState": "NEW",
-    "AwsAccountId": "332241576022",
+    "AwsAccountName": "NonProd-RDIndiaLab",
+    "AwsAccountId": "341481277192",
     "Region": "us-east-1",
-    "Id": "arn:aws:securityhub:us-east-1:332241576022:security-control/DynamoDB.2/finding/a6a913d6-24db-4554-aa79-9c4fa457e6c8",
+    "Id": "arn:aws:securityhub:us-east-1:341481277192:security-control/CloudFront.5/finding/234b035d-4a45-4732-bc50-0cf3f38cec79",
     "Resources": [
       {
         "Partition": "aws",
-        "Type": "AwsDynamoDbTable",
+        "Type": "AwsCloudFrontDistribution",
+        "Details": {
+          "AwsCloudFrontDistribution": {
+            "Logging": {
+              "IncludeCookies": False,
+              "Enabled": False
+            },
+            "DefaultRootObject": "ccp.html",
+            "Origins": {
+              "Items": [
+                {
+                  "DomainName": "fbnk-hlt-email-dev-bucket.s3.us-east-1.amazonaws.com",
+                  "OriginPath": "/emailsdkV3/ccp/Build103023.1",
+                  "Id": "fbnk-hlt-email-dev-bucket-id2"
+                },
+                {
+                  "DomainName": "fbnk-hlt-email-dev-bucket.s3.us-east-1.amazonaws.com",
+                  "OriginPath": "/emailsdkV3/ccp/Build103023.1",
+                  "Id": "fbnk-hlt-email-dev-bucket-id1"
+                }
+              ]
+            },
+            "DefaultCacheBehavior": {
+              "ViewerProtocolPolicy": "https-only"
+            },
+            "DomainName": "dve75zlqy39y1.cloudfront.net",
+            "OriginGroups": {
+              "Items": [
+                {
+                  "FailoverCriteria": {
+                    "StatusCodes": {
+                      "Quantity": 8,
+                      "Items": [
+                        400,
+                        403,
+                        404,
+                        416,
+                        500,
+                        502,
+                        503,
+                        504
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "LastModifiedTime": "2023-11-28T05:01:37.074Z",
+            "CacheBehaviors": {
+              "Items": [
+                {
+                  "ViewerProtocolPolicy": "https-only"
+                }
+              ]
+            }
+          }
+        },
         "Region": "us-east-1",
-        "Id": "arn:aws:dynamodb:us-east-1:332241576022:table/test_delete_me"
+        "Id": "arn:aws:cloudfront::341481277192:distribution/E1OH9JMPDVD94Y"
       }
-    ],
-    "Note": {
-      "UpdatedBy": "Security Hub - Enrichment Automation",
-      "Text": "Account Name: SecurityHub-Admin OU Name: citCore Tags: Platform=Core Services, Client=SharedAllocation_All, Dept=SharedAllocation, Name=SecurityHub-Admin Security Contact Details: Name:James R Daley | Title:Associate Director AWS Architecture | Email:jim.daley@concentrix.com | Phone +1 469-964-8040",
-      "UpdatedAt": "2023-09-05T23:42:28.546Z"
-    },
-    "UserDefinedFields": {
-      "Platform": "Core Services",
-      "securityContact": " Security Contact Details: Name:James R Daley | Title:Associate Director AWS Architecture | Email:jim.daley@concentrix.com | Phone +1 469-964-8040",
-      "Dept": "SharedAllocation",
-      "OU": "citCore",
-      "Enriched": "True",
-      "Client": "SharedAllocation_All",
-      "Name": "SecurityHub-Admin",
-      "AccountName": "SecurityHub-Admin"
-    },
-    "ProcessedAt": "2023-09-05T23:42:28.561Z"
-  }
+    ]
+    }
     event = {}
     event['Finding'] = finding
     #event['parse_id_pattern'] = '^arn:(?:aws|aws-us-gov|aws-cn):dynamodb:(?:[a-z]{2}(?:-gov)?-[a-z]+-\d):\d{12}:.*'
-    event['parse_id_pattern'] = '^arn:(?:aws|aws-us-gov|aws-cn):dynamodb:(?:[a-z]{2}(?:-gov)?-[a-z]+-\d):\d{12}:table/(.*)$'
-    event['expected_control_id'] = 'DynamoDB.2'
+    #event['parse_id_pattern'] = '^arn:(?:aws|aws-us-gov|aws-cn):dynamodb:(?:[a-z]{2}(?:-gov)?-[a-z]+-\d):\d{12}:table/(.*)$'
+    event['parse_id_pattern'] = '(.*)$'
+    
+    #event['expected_control_id'] = 'DynamoDB.2'
+    event['expected_control_id'] = [
+        "CloudFront.1",
+        "CloudFront.3",
+        "CloudFront.5"
+    ]
     x =parse_event(event, None)
     print(x)
     

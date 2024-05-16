@@ -1510,14 +1510,8 @@ export class RemediationRunbookStack extends cdk.Stack {
       remediationPolicy.addResources('*');
       inlinePolicy.addStatements(remediationPolicy);
 
-      const remediationPolicy2 = new PolicyStatement();
-      remediationPolicy2.addActions('ec2:*');
-      remediationPolicy2.effect = Effect.ALLOW;
-      remediationPolicy2.addResources('*');
-      inlinePolicy.addStatements(remediationPolicy2);
-
       const remediationPolicy3 = new PolicyStatement();
-      remediationPolicy3.addActions('elasticloadbalancing:*');
+      remediationPolicy3.addActions('elasticloadbalancing:ModifyLoadBalancerAttributes');
       remediationPolicy3.effect = Effect.ALLOW;
       remediationPolicy3.addResources('*');
       inlinePolicy.addStatements(remediationPolicy3);
@@ -1595,6 +1589,68 @@ export class RemediationRunbookStack extends cdk.Stack {
         },
       };
     }
+
+    
+    //-----------------------
+    // EnableStepFunctionLogging
+    //
+    {
+      const remediationName = 'EnableStepFunctionLogging';
+      const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
+
+      const remediationPolicy1 = new PolicyStatement();
+      remediationPolicy1.addActions('states:UpdateStateMachine');
+      remediationPolicy1.effect = Effect.ALLOW;
+      remediationPolicy1.addResources('*');
+      inlinePolicy.addStatements(remediationPolicy1);
+
+      const remediationPolicy2 = new PolicyStatement();
+      remediationPolicy2.addActions('iam:*');
+      remediationPolicy2.effect = Effect.ALLOW;
+      remediationPolicy2.addResources('*');
+      inlinePolicy.addStatements(remediationPolicy2);
+
+      const remediationPolicy3 = new PolicyStatement();
+      remediationPolicy3.addActions('states:DescribeStateMachine');
+      remediationPolicy3.effect = Effect.ALLOW;
+      remediationPolicy3.addResources('*');
+      inlinePolicy.addStatements(remediationPolicy3);
+
+      const remediationPolicy4 = new PolicyStatement();
+      remediationPolicy4.addActions('logs:*','cloudwatch:*');
+      remediationPolicy4.effect = Effect.ALLOW;
+      remediationPolicy4.addResources('*');
+      inlinePolicy.addStatements(remediationPolicy4);
+
+      new SsmRole(props.roleStack, 'RemediationRole ' + remediationName, {
+        solutionId: props.solutionId,
+        ssmDocName: remediationName,
+        remediationPolicy: inlinePolicy,
+        remediationRoleName: `${remediationRoleNameBase}${remediationName}`,
+      });
+
+      RunbookFactory.createRemediationRunbook(this, 'ASR ' + remediationName, {
+        ssmDocName: remediationName,
+        ssmDocPath: ssmdocs,
+        ssmDocFileName: `${remediationName}.yaml`,
+        scriptPath: `${ssmdocs}/scripts`,
+        solutionVersion: props.solutionVersion,
+        solutionDistBucket: props.solutionDistBucket,
+        solutionId: props.solutionId,
+      });
+      const childToMod = inlinePolicy.node.findChild('Resource') as CfnPolicy;
+      childToMod.cfnOptions.metadata = {
+        cfn_nag: {
+          rules_to_suppress: [
+            {
+              id: 'W12',
+              reason: 'Resource * is required for to allow remediation for any resource.',
+            },
+          ],
+        },
+      };
+    }
+
 
     //-----------------------
     // EnableAPIGatewayLogging
@@ -1781,6 +1837,35 @@ export class RemediationRunbookStack extends cdk.Stack {
         },
       };
     }
+    //-----------------------------------------
+    // ASR-AssignWAFToResource
+    //
+    {
+      const remediationName = 'AssignWAFToResource';
+      const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
+
+      const remediationPermsEc2 = new PolicyStatement();
+      remediationPermsEc2.addActions(
+        'waf:*',
+        'execute-api:*',
+      );
+      remediationPermsEc2.effect = Effect.ALLOW;
+      remediationPermsEc2.addResources('*');
+      inlinePolicy.addStatements(remediationPermsEc2);
+
+      const childToMod = inlinePolicy.node.findChild('Resource') as CfnPolicy;
+      childToMod.cfnOptions.metadata = {
+        cfn_nag: {
+          rules_to_suppress: [
+            {
+              id: 'W12',
+              reason: 'Resource * is required for to allow remediation for *any* resource.',
+            },
+          ],
+        },
+      };
+    }
+
 
     //=========================================================================
     // The following runbooks are copied from AWS-owned documents to make them

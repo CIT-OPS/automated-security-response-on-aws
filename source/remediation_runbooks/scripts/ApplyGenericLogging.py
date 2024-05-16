@@ -11,9 +11,6 @@ from botocore.config import Config
 
 def runbook_handler(event, context):
   ResourceId = event['ResourceId']  
-  # arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/XPVA-TstAR2-DID-DEV1/25d1f4f34ae00664
-  # arn:aws:apigateway:us-east-1::/restapis/2abcdefghi/stages/prod
-
   ResourceSplit = ResourceId.split(":")
   serviceName = ResourceSplit[2]
   if serviceName == 'elasticloadbalancing':
@@ -53,7 +50,7 @@ def runbook_handler(event, context):
         setupAPIGatewayAccountSettings(AwsAccountId, apigwclient)
         
         # Get/Create Log Group for access and execution logging
-        accesslogGroupArn = createLogGroup('API-Gateway-Access-Logs_'+ApiId+'/'+stageName, region, AwsAccountId)
+        accesslogGroupArn = createLogGroup('/aws/vendedlogs/APIGW-Access_'+ApiId+'/'+stageName, region, AwsAccountId)
         #executelogGroupArn = createLogGroup('/aws/apigateway/execution/'+ApiId+'/'+stageName, region, AwsAccountId)
         
         # Get the current Stage Info and figure out whats needed
@@ -157,6 +154,87 @@ def runbook_handler(event, context):
             'status': 'ERROR'
         }
 
+  if ResourceType == "AwsStepFunctionsStateMachine":
+    try:
+        sfnclient = boto3.client('stepfunctions',region_name=region)
+
+        # arn:aws:states:us-east-1:529247589681:stateMachine:XPVA-SDN248-SHD-COMM-RetentionStateMachine
+        sfnName = ResourceSplit[6]
+
+        # Get the state machine info
+        response = sfnclient.describe_state_machine(
+            stateMachineArn=ResourceId
+        )
+        roleArn = response['roleArn']
+        logLevel = "OFF"
+        logGroupArn = ""
+
+        # a lot of crap just to get overrides
+        if "loggingConfiguration" in response:
+            loggingConfiguration = response['loggingConfiguration']
+            logLevel = loggingConfiguration['level']
+            if 'destinations' in loggingConfiguration:
+                destinations = loggingConfiguration['destinations']
+                destination = destinations[0]    # limited to one
+                if 'cloudWatchLogsLogGroup' in destination:
+                    cloudWatchLogsLogGroup = destination['cloudWatchLogsLogGroup']
+                    if 'logGroupArn' in cloudWatchLogsLogGroup:
+                        logGroupArn = cloudWatchLogsLogGroup['logGroupArn']
+
+        roleArray = roleArn.split('/')
+        roleName = roleArray[1]
+        
+        if logGroupArn == "":
+            # Get/Create Log Group for access and execution logging
+            logGroupArn = createLogGroup('/aws/SFNLog/'+sfnName, region, AwsAccountId)+":*"
+
+        print(f"[INFO] Role {roleName} will be updated for cloudwatch logs permissions")
+        print(f"[INFO] StepFunction {sfnName} will be logged to {logGroupArn}")
+
+        #Attach Permission to Role
+        iamClient = boto3.client('iam')
+
+        try:
+            iamClient.attach_role_policy(
+                RoleName=roleName,
+                PolicyArn='arn:aws:iam::aws:policy/CloudWatchLogsFullAccess'
+            )
+        except Exception as e:
+            print(e)
+            pass
+        print(f"[INFO] Role {roleName} updated for CloudWatchLogsFullAccess")
+        print(f"[INFO] Delay 10 seconds waiting for role consistency because no waiter available")
+        time.sleep(10) # Sleep for 10 seconds
+
+        # update the state machine
+        response = sfnclient.update_state_machine(
+            stateMachineArn=ResourceId,
+            loggingConfiguration={
+                'level': 'ERROR',
+                'includeExecutionData': False,
+                'destinations': [
+                    {
+                        'cloudWatchLogsLogGroup': {
+                            'logGroupArn': logGroupArn
+                        }
+                    },
+                ]
+            }
+        )
+        return {
+            'message': f'Step function {sfnName} modified for logging',
+            'status': 'RESOLVED'
+        }
+    except Exception as e:
+        print("Unable to set logging on Step Function")
+        print(e)
+        return {
+            'message': f'Unable to set up logging on Stepfunction {e}',
+            'status': 'ERROR'
+        }
+
+
+
   if ResourceType == "AwsApiGatewayV2Stage":
     try:
         apigwclientv2 = boto3.client('apigatewayv2',region_name=region) 
@@ -169,7 +247,9 @@ def runbook_handler(event, context):
         setupAPIGatewayAccountSettings(AwsAccountId, apigwclientv1)     # uses v1 settings for account level
         
         # Get/Create Log Group for access and execution logging
-        accesslogGroupArn = createLogGroup('API-Gateway-Access-Logs_'+ApiId+'/'+stageName, region, AwsAccountId)
+        # accesslogGroupArn = createLogGroup('API-Gateway-Access-Logs_'+ApiId+'/'+stageName, region, AwsAccountId)
+        accesslogGroupArn = createLogGroup('/aws/vendedlogs/APIGW-Access_'+ApiId+'/'+stageName, region, AwsAccountId)
+        
 
         # Get some info on the API
         response = apigwclientv2.get_api(ApiId=ApiId)
@@ -382,7 +462,7 @@ def setupAPIGatewayAccountSettings(AwsAccountId, apigwclient):
                 print(f"[INFO] The role {roleName} already exists... proceeding")
             else:
                 print(error)
-            pass
+                pass
 
         #Attach Permission to Role
         try:
@@ -401,7 +481,6 @@ def setupAPIGatewayAccountSettings(AwsAccountId, apigwclient):
                         'op': 'replace',
                         'path': '/cloudwatchRoleArn',
                         'value': f"arn:aws:iam::{AwsAccountId}:role/APIGatewayLogWriterRole",
-                        #'from': 'string'
                     },
                 ]
             )
@@ -446,7 +525,7 @@ def createLogGroup(logGroupName, region, AwsAccountId):
                 logGroupName=logGroupName,
                 retentionInDays=365
             )
-            print(f"[INFO] Adding Retention Period of 1 year days to {logGroupName}")
+            print(f"[INFO] Adding Retention Period of 1 year to {logGroupName}")
         except Exception as error:
             print(f"[ERROR] Failed to add Retention Period of 1 year to {logGroupName} {error}")
 
@@ -454,12 +533,18 @@ def createLogGroup(logGroupName, region, AwsAccountId):
 
 
 if __name__ == "__main__":
+    # event = {
+    #    "ResourceId": "arn:aws:elasticloadbalancing:us-east-1:455768319323:loadbalancer/app/i-coreOps-proxy-lb/1533f03526fc680f",
+    #    "LoggingBucket": "sharr-logging-elb-455768319323-us-east-1",
+    #    "ResourceType": "AwsElbv2LoadBalancer",
+    #    "AccountId": "455768319323",
+    #    "Region": "us-east-1",
+    # }
     event = {
-       "ResourceId": "arn:aws:elasticloadbalancing:us-east-1:455768319323:loadbalancer/app/i-coreOps-proxy-lb/1533f03526fc680f",
-       "LoggingBucket": "sharr-logging-elb-455768319323-us-east-1",
-       "ResourceType": "AwsElbv2LoadBalancer",
-       "AccountId": "455768319323",
-       "Region": "us-east-1",
-    }
+        "AccountId": "341481277192",
+        "ResourceId": "arn:aws:apigateway:us-west-2::/restapis/yaoqf5rbej/stages/prod",
+        "Region": "us-west-2",
+        "ResourceType": "AwsApiGatewayStage"
+        }
     result = runbook_handler(event,"")
     print(result)

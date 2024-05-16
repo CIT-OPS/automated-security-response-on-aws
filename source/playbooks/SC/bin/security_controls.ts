@@ -31,6 +31,7 @@ const remediations: IControl[] = [
   { control: 'AutoScaling.1' },
   { control: 'APIGateway.1' },                            // CNXC API Gateway REST and WebSocket API execution logging should be enabled
   { control: 'APIGateway.3', executes: 'APIGateway.1'},   // CNXC API Gateway REST API stages should have AWS X-Ray tracing enabled
+  { control: 'APIGateway.9', executes: 'APIGateway.1'},   // CNXC API Gateway REST API Access logging should be configured
   { control: 'CloudFront.1'},                             // CNXC CloudFront distributions should have a default root object configured
   { control: 'CloudFront.3', executes: 'CloudFront.1' },  // CNXC CloudFront distributions should require encryption in transit
   { control: 'CloudFront.5', executes: 'CloudFront.1' },  // CNXC CloudFront distributions should have logging enabled
@@ -101,6 +102,7 @@ const remediations: IControl[] = [
   { control: 'S3.6' },
   { control: 'S3.8', executes: 'S3.2' },
   { control: 'S3.9' },    // CNXC S3 bucket server access logging should be enabled
+  { control: 'StepFunctions.1' },    // CNXC Step Function Logging
 ];
 
 const adminStack = new SecurityControlsPlaybookPrimaryStack(app, 'SCStack', {

@@ -217,7 +217,7 @@ export function getRegexRegistry(): RegexRegistry {
 
   // Not sure if this does anything yet - KPP
   registry.addCase(new RegexTestCase(String.raw`(.*)$`, 'CNXC ANYTHING', [], []));
-  registry.addCase(new RegexTestCase(String.raw`^[a-zA-Z][a-zA-Z0-9-_:]{0,25}$`, 'Resource Type', [], []));
+  registry.addCase(new RegexTestCase(String.raw`^[a-zA-Z][a-zA-Z0-9-_:]{0,30}$`, 'Resource Type', [], []));
   
   registry.addCase(
     new RegexTestCase(
