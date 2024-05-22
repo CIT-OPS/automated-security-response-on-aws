@@ -29,10 +29,11 @@ Aspects.of(app).add(new AwsSolutionsChecks());
 // Security Standard and Control Id. See cis-member-stack
 const remediations: IControl[] = [
   { control: 'AutoScaling.1' },
+  { control: 'CloudFormation.1' },
+  { control: 'CloudFront.12' },
   { control: 'APIGateway.1' },                            // CNXC API Gateway REST and WebSocket API execution logging should be enabled
   { control: 'APIGateway.3', executes: 'APIGateway.1'},   // CNXC API Gateway REST API stages should have AWS X-Ray tracing enabled
   { control: 'APIGateway.9', executes: 'APIGateway.1'},   // CNXC API Gateway REST API Access logging should be configured
-  { control: 'CloudFront.1'},                             // CNXC CloudFront distributions should have a default root object configured
   { control: 'CloudFront.3', executes: 'CloudFront.1' },  // CNXC CloudFront distributions should require encryption in transit
   { control: 'CloudFront.5', executes: 'CloudFront.1' },  // CNXC CloudFront distributions should have logging enabled
   { control: 'CloudTrail.1' },
@@ -57,15 +58,22 @@ const remediations: IControl[] = [
   { control: 'CloudWatch.13', executes: 'CloudWatch.1' },
   { control: 'CloudWatch.14', executes: 'CloudWatch.1' },
   { control: 'CodeBuild.2' },
+  { control: 'CodeBuild.5' },
   { control: 'Config.1' },
   { control: 'DynamoDB.2' }, // CNXC DynamoDB tables should have point-in-time recovery enabled
   { control: 'EC2.1' },
   { control: 'EC2.2' },
+  { control: 'EC2.4' },
   { control: 'EC2.6' },
   { control: 'EC2.7' },
+  { control: 'EC2.8' },
   { control: 'EC2.13' },
   { control: 'EC2.14', executes: 'EC2.13' },
   { control: 'ELB.5' },
+  { control: 'EC2.15' },
+  { control: 'EC2.18' },
+  { control: 'EC2.19' },
+  { control: 'EC2.23' },
   { control: 'IAM.3' },
   { control: 'IAM.7' },
   { control: 'IAM.8' },
@@ -101,7 +109,16 @@ const remediations: IControl[] = [
   { control: 'S3.5' },
   { control: 'S3.6' },
   { control: 'S3.8', executes: 'S3.2' },
-  { control: 'S3.9' },    // CNXC S3 bucket server access logging should be enabled
+  { control: 'S3.9', executes: 'CloudTrail.7' },
+  { control: 'S3.11' },
+  { control: 'S3.13' },
+  { control: 'SecretsManager.1' },
+  { control: 'SecretsManager.3' },
+  { control: 'SecretsManager.4' },
+  { control: 'SNS.1' },
+  { control: 'SNS.2' },
+  { control: 'SQS.1' },
+  { control: 'SSM.4' },
   { control: 'StepFunctions.1' },    // CNXC Step Function Logging
 ];
 
