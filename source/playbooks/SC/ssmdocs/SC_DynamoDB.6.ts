@@ -1,4 +1,6 @@
-// CONCENTRIX CODE
+/* eslint-disable header/header */
+// Copyright CONCENTRIX. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
 import { Construct } from 'constructs';
 import { ControlRunbookDocument, ControlRunbookProps, RemediationScope } from './control_runbook';
 import { PlaybookProps } from '../lib/control_runbooks-construct';
@@ -13,20 +15,24 @@ import {
 } from '@cdklabs/cdk-ssm-documents';
 
 export function createControlRunbook(scope: Construct, id: string, props: PlaybookProps): ControlRunbookDocument {
-  return new ConfigureS3ServerAccessLoggingDocument(scope, id, { ...props, controlId: 'S3.9' });
+  return new CNXC_EnableDynamoDB_DeleteProtection(scope, id, { ...props, controlId: 'DynamoDB.6' });
 }
 
-class ConfigureS3ServerAccessLoggingDocument extends ControlRunbookDocument {
+class CNXC_EnableDynamoDB_DeleteProtection extends ControlRunbookDocument {
   constructor(scope: Construct, id: string, props: ControlRunbookProps) {
+    const remediationName = 'CNXC_EnableDynamoDB_DeleteProtection';
     super(scope, id, {
       ...props,
-      securityControlId: 'S3.9',
-      remediationName: 'ConfigureS3ServerAccessLogging',
+      securityControlId: 'DynamoDB.6',
+      remediationName,
       scope: RemediationScope.GLOBAL,
-      resourceIdName: 'BucketName',
-      resourceIdRegex: String.raw`^arn:(?:aws|aws-cn|aws-us-gov):s3:::([A-Za-z0-9.-]{3,63})$`,
-      updateDescription: HardCodedString.of('Configured S3 Server Access Logging'),
-      header: 'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',      
+      resourceIdName: 'TableArn',
+      resourceIdRegex: String.raw`(.*)$`,
+      updateDescription: HardCodedString.of(
+        `Enabled delete protection on table using the ${props.solutionAcronym}-${remediationName} runbook.`,
+      ),
+      header:
+        'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',
     });
   }
 
@@ -35,13 +41,7 @@ class ConfigureS3ServerAccessLoggingDocument extends ControlRunbookDocument {
     const outputs = super.getParseInputStepOutputs();
 
     outputs.push({
-      name: 'AccountId',
-      outputType: DataTypeEnum.STRING,
-      selector: '$.Payload.account_id',
-    });
-
-    outputs.push({
-      name: 'Region',
+      name: 'TableRegion',
       outputType: DataTypeEnum.STRING,
       selector: '$.Payload.resource.Region',
     });
@@ -49,17 +49,12 @@ class ConfigureS3ServerAccessLoggingDocument extends ControlRunbookDocument {
     return outputs;
   }
 
-
-
   /** @override */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   protected getRemediationParams(): { [_: string]: any } {
     const params = super.getRemediationParams();
 
-    params.BucketName = StringVariable.of('ParseInput.BucketName');
-    params.Region = StringVariable.of('ParseInput.Region');
-    params.AccountId = StringVariable.of('ParseInput.AccountId');
-
+    params.TableArn = StringVariable.of('ParseInput.TableArn');
     return params;
   }
 

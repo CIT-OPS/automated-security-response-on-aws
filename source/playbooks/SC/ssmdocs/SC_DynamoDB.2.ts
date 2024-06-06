@@ -1,4 +1,6 @@
-// CONCENTRIX CODE
+/* eslint-disable header/header */
+// Copyright CONCENTRIX. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
 import { Construct } from 'constructs';
 import { ControlRunbookDocument, ControlRunbookProps, RemediationScope } from './control_runbook';
 import { PlaybookProps } from '../lib/control_runbooks-construct';
@@ -13,20 +15,24 @@ import {
 } from '@cdklabs/cdk-ssm-documents';
 
 export function createControlRunbook(scope: Construct, id: string, props: PlaybookProps): ControlRunbookDocument {
-  return new EnableDynamoDB_PITRDocument(scope, id, { ...props, controlId: 'DynamoDB.2' });
+  return new CNXC_EnableDynamoDB_PITRDocument(scope, id, { ...props, controlId: 'DynamoDB.2' });
 }
 
-class EnableDynamoDB_PITRDocument extends ControlRunbookDocument {
+class CNXC_EnableDynamoDB_PITRDocument extends ControlRunbookDocument {
   constructor(scope: Construct, id: string, props: ControlRunbookProps) {
+    const remediationName = 'CNXC_EnableDynamoDB_PITR';
     super(scope, id, {
       ...props,
       securityControlId: 'DynamoDB.2',
-      remediationName: 'EnableDynamoDB_PITR',
+      remediationName,
       scope: RemediationScope.GLOBAL,
       resourceIdName: 'TableArn',
       resourceIdRegex: String.raw`(.*)$`,
-      updateDescription: HardCodedString.of('Enabled PITR on table'),
-      header: 'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',      
+      updateDescription: HardCodedString.of(
+        `Enabled PITR on table using the ${props.solutionAcronym}-${remediationName} runbook.`,
+      ),
+      header:
+        'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',
     });
   }
 
@@ -48,7 +54,6 @@ class EnableDynamoDB_PITRDocument extends ControlRunbookDocument {
   protected getRemediationParams(): { [_: string]: any } {
     const params = super.getRemediationParams();
 
-    
     params.TableArn = StringVariable.of('ParseInput.TableArn');
     return params;
   }

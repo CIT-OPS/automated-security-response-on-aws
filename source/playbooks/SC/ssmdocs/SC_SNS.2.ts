@@ -18,23 +18,8 @@ export class EnableDeliveryLoggingForSNSTopicDocument extends ControlRunbookDocu
       scope: RemediationScope.REGIONAL,
       resourceIdName: 'SNSTopicArn',
       updateDescription: HardCodedString.of('Delivery Status Logging enabled on SNS Topic'),
-      header: 'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',      
     });
   }
-
-    /** @override */
-    protected getParseInputStepOutputs(): Output[] {
-      const outputs = super.getParseInputStepOutputs();
-
-      outputs.push({
-        name: 'Region',
-        outputType: DataTypeEnum.STRING,
-        selector: '$.Payload.resource.Region',
-      });
-  
-      return outputs;
-    }
-  
 
   /** @override */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

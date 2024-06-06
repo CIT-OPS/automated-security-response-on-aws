@@ -2180,6 +2180,8 @@ This document configures a default root object to be returned when visiting a Cl
                   "Finding": "{{ Finding }}",
                   "expected_control_id": [
                     "CloudFront.1",
+                    "CloudFront.3",
+                    "CloudFront.5",
                   ],
                   "parse_id_pattern": "^(arn:(?:aws|aws-us-gov|aws-cn):cloudfront::\\d{12}:distribution\\/([A-Z0-9]+))$",
                 },
@@ -2460,8 +2462,23 @@ def parse_event(event, _):
                   "Type": "StringMap",
                 },
                 {
-                  "Name": "CloudFrontDistribution",
+                  "Name": "ResourceId",
                   "Selector": "$.Payload.resource_id",
+                  "Type": "String",
+                },
+                {
+                  "Name": "Region",
+                  "Selector": "$.Payload.resource.Region",
+                  "Type": "String",
+                },
+                {
+                  "Name": "AccountId",
+                  "Selector": "$.Payload.account_id",
+                  "Type": "String",
+                },
+                {
+                  "Name": "ResourceType",
+                  "Selector": "$.Payload.object.Type",
                   "Type": "String",
                 },
               ],
@@ -2469,10 +2486,13 @@ def parse_event(event, _):
             {
               "action": "aws:executeAutomation",
               "inputs": {
-                "DocumentName": "ASR-EnableCloudFrontDefaultRootObject",
+                "DocumentName": "ASR-CNXC_EnableCloudfrontLogging",
                 "RuntimeParameters": {
+                  "AccountId": "{{ ParseInput.AccountId }}",
                   "AutomationAssumeRole": "arn:{{ global:AWS_PARTITION }}:iam::{{ global:ACCOUNT_ID }}:role/{{ RemediationRoleName }}",
-                  "CloudFrontDistribution": "{{ ParseInput.CloudFrontDistribution }}",
+                  "Region": "{{ ParseInput.Region }}",
+                  "ResourceId": "{{ ParseInput.ResourceId }}",
+                  "ResourceType": "{{ ParseInput.ResourceType }}",
                 },
               },
               "name": "Remediation",
@@ -2488,7 +2508,7 @@ def parse_event(event, _):
                   },
                 ],
                 "Note": {
-                  "Text": "Configured default root object for CloudFront distribution",
+                  "Text": "Configured CloudFront distribution",
                   "UpdatedBy": "ASR-NIST80053R5_5.0.0_CloudFront.1",
                 },
                 "Service": "securityhub",
@@ -2516,7 +2536,7 @@ def parse_event(event, _):
             },
             "RemediationRoleName": {
               "allowedPattern": "^[\\w+=,.@-]+$",
-              "default": "SO0111-EnableCloudFrontDefaultRootObject",
+              "default": "SO0111-CNXC_EnableCloudfrontLogging",
               "type": "String",
             },
           },
@@ -21777,12 +21797,49 @@ def parse_event(event, _):
               ],
             },
             {
+              "action": "aws:branch",
+              "description": "Suppress if the bucket to log to is the same as the affected object",
+              "inputs": {
+                "Choices": [
+                  {
+                    "NextStep": "SuppressFinding",
+                    "StringEquals": "cnxc-s3-server-access-logging-{{ global:ACCOUNT_ID }}-{{ global:REGION }}",
+                    "Variable": "{{ ParseInput.BucketName }}",
+                  },
+                ],
+                "Default": "CreateAccessLoggingBucket",
+              },
+              "name": "IsALoggingBucket",
+            },
+            {
+              "action": "aws:executeAwsApi",
+              "inputs": {
+                "Api": "BatchUpdateFindings",
+                "FindingIdentifiers": [
+                  {
+                    "Id": "{{ ParseInput.FindingId }}",
+                    "ProductArn": "{{ ParseInput.ProductArn }}",
+                  },
+                ],
+                "Note": {
+                  "Text": "Remediation was suppressed because the bucket to log to is the same as the affected object.",
+                  "UpdatedBy": "ASR-NIST80053R5_5.0.0_S3.9",
+                },
+                "Service": "securityhub",
+                "Workflow": {
+                  "Status": "SUPPRESSED",
+                },
+              },
+              "isEnd": true,
+              "name": "SuppressFinding",
+            },
+            {
               "action": "aws:executeAutomation",
               "inputs": {
                 "DocumentName": "ASR-CreateAccessLoggingBucket",
                 "RuntimeParameters": {
                   "AutomationAssumeRole": "arn:{{ global:AWS_PARTITION }}:iam::{{ global:ACCOUNT_ID }}:role/SO0111-CreateAccessLoggingBucket",
-                  "BucketName": "so0111-cloudtrailaccesslogs-{{ global:ACCOUNT_ID }}-{{ global:REGION }}",
+                  "BucketName": "cnxc-s3-server-access-logging-{{ global:ACCOUNT_ID }}-{{ global:REGION }}",
                 },
               },
               "name": "CreateAccessLoggingBucket",
@@ -21804,7 +21861,7 @@ def parse_event(event, _):
                     "http://acs.amazonaws.com/groups/s3/LogDelivery",
                   ],
                   "TargetBucket": [
-                    "so0111-cloudtrailaccesslogs-{{ global:ACCOUNT_ID }}-{{ global:REGION }}",
+                    "cnxc-s3-server-access-logging-{{ global:ACCOUNT_ID }}-{{ global:REGION }}",
                   ],
                   "TargetPrefix": [
                     "{{ ParseInput.BucketName }}",
@@ -21824,7 +21881,7 @@ def parse_event(event, _):
                   },
                 ],
                 "Note": {
-                  "Text": "Created S3 bucket so0111-cloudtrailaccesslogs-{{ global:ACCOUNT_ID }}-{{ global:REGION }} for logging access to {{ ParseInput.BucketName }}",
+                  "Text": "Created S3 bucket cnxc-s3-server-access-logging-{{ global:ACCOUNT_ID }}-{{ global:REGION }} for logging access to {{ ParseInput.BucketName }}",
                   "UpdatedBy": "ASR-NIST80053R5_5.0.0_S3.9",
                 },
                 "Service": "securityhub",

@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 ---
-schemaVersion: "0.3"
+schemaVersion: '0.3'
 description: |
   ### Document name - ConfigureS3ServerAccessLogging
 
@@ -10,15 +10,15 @@ description: |
   * Creates a logging bucket in account / region if required.
   * Validates the properties of the logging bucket.
   * Configures the finding bucket to log to the logging bucket, unless the finding bucket and logging bucket are the same name.
-  
+
   ## Input Parameters
   * AutomationAssumeRole: (Required) The Amazon Resource Name (ARN) of the AWS Identity and Access Management (IAM) role that allows Systems Manager Automation to perform the actions on your behalf.
   * BucketName: 
 
   ## Output Parameters
-  * 
+  *
 
-assumeRole: "{{ AutomationAssumeRole }}"
+assumeRole: '{{ AutomationAssumeRole }}'
 parameters:
   AutomationAssumeRole:
     type: String
@@ -42,8 +42,7 @@ outputs:
   - Remediation.status
 
 mainSteps:
-  -
-    name: CreateLoggingBucket
+  - name: CreateLoggingBucket
     action: 'aws:executeScript'
     outputs:
       - Name: LoggingBucketName
@@ -60,7 +59,7 @@ mainSteps:
       Runtime: python3.8
       Handler: runbook_handler
       Script: |-
-        %%SCRIPT=CreateServerAccessLogging_CreateDestBucket.py%%
+        %%SCRIPT=CNXC_CreateServerAccessLogging_CreateDestBucket.py%%
     isEnd: false
   - name: Remediation
     action: 'aws:executeScript'
@@ -87,6 +86,5 @@ mainSteps:
       Runtime: python3.8
       Handler: runbook_handler
       Script: |-
-        %%SCRIPT=CreateServerAccessLogging_ApplyConfig.py%%
+        %%SCRIPT=CNXC_CreateServerAccessLogging_ApplyConfig.py%%
     isEnd: true
-  

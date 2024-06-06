@@ -5,10 +5,16 @@ import { ControlRunbookDocument, ControlRunbookProps, RemediationScope } from '.
 import { PlaybookProps } from '../lib/control_runbooks-construct';
 import {
   AutomationStep,
+  AwsApiStep,
+  AwsService,
+  BranchStep,
+  Choice,
+  DataTypeEnum,
   ExecuteAutomationStep,
   HardCodedString,
   HardCodedStringMap,
   IStringVariable,
+  Operation,
   StringFormat,
   StringVariable,
 } from '@cdklabs/cdk-ssm-documents';
@@ -39,6 +45,20 @@ export class ConfigureS3BucketLoggingDocument extends ControlRunbookDocument {
     });
   }
 
+  suppressBucket = new AwsApiStep(this, 'api', {
+    service: AwsService.STS,
+    pascalCaseApi: 'getCallerIdentity',
+    apiParams: {},
+    isEnd: true,
+    outputs: [
+      {
+        outputType: DataTypeEnum.STRING,
+        name: 'User',
+        selector: '$.UserId',
+      },
+    ],
+  });
+
   /** @override */
   protected getExtraSteps(): AutomationStep[] {
     const createAccessLoggingBucketStepName = 'CreateAccessLoggingBucket';
@@ -53,7 +73,41 @@ export class ConfigureS3BucketLoggingDocument extends ControlRunbookDocument {
       }),
     });
 
-    return [createAccessLoggingBucketStep];
+    const suppressRemediation = new AwsApiStep(this, 'SuppressFinding', {
+      service: AwsService.SECURITY_HUB,
+      pascalCaseApi: 'BatchUpdateFindings',
+      apiParams: {
+        FindingIdentifiers: [
+          {
+            Id: StringVariable.of('ParseInput.FindingId'),
+            ProductArn: StringVariable.of('ParseInput.ProductArn'),
+          },
+        ],
+        Note: {
+          Text: 'Remediation was suppressed because the bucket to log to is the same as the affected object.',
+          UpdatedBy: this.documentName,
+        },
+        Workflow: { Status: 'SUPPRESSED' },
+      },
+      outputs: [],
+      isEnd: true,
+    });
+
+    const branchStep = new BranchStep(this, 'IsALoggingBucket', {
+      name: 'IsALoggingBucket',
+      description: 'Suppress if the bucket to log to is the same as the affected object',
+      defaultStepName: createAccessLoggingBucketStep.name,
+      choices: [
+        new Choice({
+          operation: Operation.STRING_EQUALS,
+          variable: StringVariable.of('ParseInput.BucketName'),
+          constant: 'cnxc-s3-server-access-logging-{{ global:ACCOUNT_ID }}-{{ global:REGION }}',
+          jumpToStepName: suppressRemediation.name,
+        }),
+      ],
+    });
+
+    return [branchStep, suppressRemediation, createAccessLoggingBucketStep];
   }
 
   /** @override */
@@ -78,10 +132,12 @@ export class ConfigureS3BucketLoggingDocument extends ControlRunbookDocument {
     return params;
   }
 }
-
+/* eslint-disable @typescript-eslint/no-unused-vars */
 function getTargetBucketName(solutionId: string): IStringVariable {
-  return new StringFormat(`${solutionId}-cloudtrailaccesslogs-%s-%s`.toLowerCase(), [
+  //return new StringFormat(`${solutionId}-cloudtrailaccesslogs-%s-%s`.toLowerCase(), [
+  return new StringFormat(`cnxc-s3-server-access-logging-%s-%s`.toLowerCase(), [
     StringVariable.of('global:ACCOUNT_ID'),
     StringVariable.of('global:REGION'),
   ]);
 }
+/* eslint-enable @typescript-eslint/no-unused-vars */

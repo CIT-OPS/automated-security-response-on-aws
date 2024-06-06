@@ -1,4 +1,4 @@
-schemaVersion: "0.3"
+schemaVersion: '0.3'
 description: |
   ### Document name - ASR-EnableDynamoDB_PITR
 
@@ -13,7 +13,7 @@ description: |
   ## Output Parameters
   * Remediation.Output: STDOUT and messages from the remediation steps.
 
-assumeRole: "{{ AutomationAssumeRole }}"
+assumeRole: '{{ AutomationAssumeRole }}'
 parameters:
   AutomationAssumeRole:
     type: String
@@ -23,25 +23,24 @@ parameters:
     type: String
     description: The ARN of a DynamoDB table to set PITR on
     allowedPattern: '(.*)$'
-    
+
 outputs:
   - Remediation.Output
 
 mainSteps:
-  - 
-    name: Remediation
+  - name: Remediation
     action: 'aws:executeScript'
     outputs:
       - Name: Output
-        Selector: $.Payload.response
+        Selector: $.Payload
         Type: StringMap
     inputs:
-      InputPayload: 
+      InputPayload:
         tableArn: '{{TableArn}}'
         tableRegion: '{{global:REGION}}'
       Runtime: python3.8
       Handler: lambda_handler
       Script: |-
-        %%SCRIPT=EnableDynamoDB_PITR.py%%
+        %%SCRIPT=CNXC_EnableDynamoDB_PITR.py%%
 
     isEnd: true

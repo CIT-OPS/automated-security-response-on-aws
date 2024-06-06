@@ -1,22 +1,21 @@
-schemaVersion: "0.3"
+schemaVersion: '0.3'
 description: |
-  ### Document name - ASR-AssignWAFToResource
+  ### Document name - ASR-EnableAPIGatewayLogging
 
   ## What does this document do?
-  Assigns a WAF, creating a default if necessary, to a resource.
-  
+  Enables appropriate API Gateway Logging:
+
 
   ## Input Parameters
   * AutomationAssumeRole: (Required) The Amazon Resource Name (ARN) of the AWS Identity and Access Management (IAM) role that allows Systems Manager Automation to perform the actions on your behalf.
   * ResourceId: (Required) The Resource ID
   * Region: (Required) Finding Region
   * Accountid: (Required) Account Id
-  * ResourceType: (Required) The Type of the resource (ie AwsApiGatewayStage for REST and AwsApiGatewayV2Stage for v2)
 
   ## Output Parameters
   * Remediation.Output: STDOUT and messages from the remediation steps.
 
-assumeRole: "{{ AutomationAssumeRole }}"
+assumeRole: '{{ AutomationAssumeRole }}'
 parameters:
   AutomationAssumeRole:
     type: String
@@ -29,7 +28,7 @@ parameters:
   Region:
     type: String
     description: The REGION of the resource
-    allowedPattern: '^[a-zA-Z0-9]{2}-[a-z]{0,12}-[0-9]{1,2}$'
+    allowedPattern: '^[a-z]{2}(?:-gov)?-[a-z]+-\d$'
   AccountId:
     type: String
     description: The Account Id of the resource
@@ -37,27 +36,20 @@ parameters:
   ResourceType:
     type: String
     description: The Type of the resource (ie AwsApiGatewayStage for REST and AwsApiGatewayV2Stage for v2)
-    allowedPattern: '^[a-zA-Z][a-zA-Z0-9-_:]{0,25}$'
+    allowedPattern: '^(AwsElbv2LoadBalancer|AwsApiGatewayStage|AwsStepFunctionsStateMachine|AwsApiGatewayV2Stage|AwsCloudFrontDistribution)$'
 
 outputs:
   - Remediation.Output
 
 mainSteps:
-- 
-    name: GetOrCreateDefaultWAF
+  - name: Remediation
     action: 'aws:executeScript'
     outputs:
       - Name: Output
         Selector: $.Payload.response
         Type: StringMap
-      - Name: WAF_ARN
-        Selector: $.Payload.WAF_ARN
-        Type: String
-      - Name: Message
-        Selector: $.Payload.Message
-        Type: String
     inputs:
-      InputPayload: 
+      InputPayload:
         ResourceId: '{{ResourceId}}'
         Region: '{{Region}}'
         AccountId: '{{AccountId}}'
@@ -65,22 +57,6 @@ mainSteps:
       Runtime: python3.8
       Handler: runbook_handler
       Script: |-
-        %%SCRIPT=CreateWAF.py%%
-    isEnd: false
-- 
-    name: Remediation
-    action: 'aws:executeScript'
-    outputs:
-      - Name: Output
-        Selector: $.Payload.response
-        Type: StringMap
-    inputs:
-      InputPayload: 
-        ResourceId: '{{ResourceId}}'
-        ResourceType: '{{ResourceType}}'
-        WAF_ARN: '{{GetOrCreateDefaultWAF.WAF_ARN}}'
-      Runtime: python3.8
-      Handler: runbook_handler
-      Script: |-
-        %%SCRIPT=AssignWAF.py%%
+        %%SCRIPT=CNXC_ApplyGenericLogging.py%%
+
     isEnd: true

@@ -6,8 +6,8 @@ import { ControlRunbookDocument } from '../ssmdocs/control_runbook';
 import { CfnCondition, CfnParameter, Fn } from 'aws-cdk-lib';
 
 import * as autoscaling_1 from '../ssmdocs/SC_AutoScaling.1';
-import * as apigateway_1 from '../ssmdocs/SC_APIGateway.1';   // CNXC
-import * as apigateway_4 from '../ssmdocs/SC_APIGateway.4';   // CNXC
+import * as apigateway_1 from '../ssmdocs/SC_APIGateway.1'; // CNXC
+import * as apigateway_4 from '../ssmdocs/SC_APIGateway.4'; // CNXC
 import * as cloudformation_1 from '../ssmdocs/SC_CloudFormation.1';
 import * as cloudfront_1 from '../ssmdocs/SC_CloudFront.1';
 import * as cloudfront_12 from '../ssmdocs/SC_CloudFront.12';
@@ -22,6 +22,7 @@ import * as codebuild_2 from '../ssmdocs/SC_CodeBuild.2';
 import * as codebuild_5 from '../ssmdocs/SC_CodeBuild.5';
 import * as config_1 from '../ssmdocs/SC_Config.1';
 import * as dynamodb_2 from '../ssmdocs/SC_DynamoDB.2'; // CNXC
+import * as dynamodb_6 from '../ssmdocs/SC_DynamoDB.6'; // CNXC
 import * as ec2_1 from '../ssmdocs/SC_EC2.1';
 import * as ec2_2 from '../ssmdocs/SC_EC2.2';
 import * as ec2_4 from '../ssmdocs/SC_EC2.4';
@@ -66,12 +67,11 @@ import * as s3_13 from '../ssmdocs/SC_S3.13';
 import * as secretsmanager_1 from '../ssmdocs/SC_SecretsManager.1';
 import * as secretsmanager_3 from '../ssmdocs/SC_SecretsManager.3';
 import * as secretsmanager_4 from '../ssmdocs/SC_SecretsManager.4';
-import * as s3_9 from '../ssmdocs/SC_S3.9'; // CNXC
 import * as sqs_1 from '../ssmdocs/SC_SQS.1';
 import * as sns_1 from '../ssmdocs/SC_SNS.1';
 import * as sns_2 from '../ssmdocs/SC_SNS.2';
+import * as stepfunctions_1 from '../ssmdocs/SC_StepFunctions.1';
 import * as ssm_4 from '../ssmdocs/SC_SSM.4';
-import * as stepfunctions_1 from '../ssmdocs/SC_StepFunctions.1'
 
 export interface PlaybookProps {
   standardShortName: string;
@@ -111,6 +111,7 @@ export class ControlRunbooks extends Construct {
     this.add(codebuild_5.createControlRunbook(this, 'CodeBuild.5', props));
     this.add(config_1.createControlRunbook(this, 'Config.1', props));
     this.add(dynamodb_2.createControlRunbook(this, 'DynamoDB.2', props));
+    this.add(dynamodb_6.createControlRunbook(this, 'DynamoDB.6', props));
     this.add(ec2_1.createControlRunbook(this, 'EC2.1', props));
     this.add(ec2_2.createControlRunbook(this, 'EC2.2', props));
     this.add(ec2_4.createControlRunbook(this, 'EC2.4', props));

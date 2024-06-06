@@ -1,4 +1,6 @@
-// CONCENTRIX CODE
+/* eslint-disable header/header */
+// Copyright CONCENTRIX. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
 import { Construct } from 'constructs';
 import { ControlRunbookDocument, ControlRunbookProps, RemediationScope } from './control_runbook';
 import { PlaybookProps } from '../lib/control_runbooks-construct';
@@ -13,20 +15,21 @@ import {
 } from '@cdklabs/cdk-ssm-documents';
 
 export function createControlRunbook(scope: Construct, id: string, props: PlaybookProps): ControlRunbookDocument {
-  return new EnableAPIGatewayLoggingDocument(scope, id, { ...props, controlId: 'ELB.5' });
+  return new CNXC_EnableAPIGatewayLoggingDocument(scope, id, { ...props, controlId: 'ELB.5' });
 }
 
-class EnableAPIGatewayLoggingDocument extends ControlRunbookDocument {
+class CNXC_EnableAPIGatewayLoggingDocument extends ControlRunbookDocument {
   constructor(scope: Construct, id: string, props: ControlRunbookProps) {
     super(scope, id, {
       ...props,
       securityControlId: 'ELB.5',
-      remediationName: 'EnableLoadBalancerLogging',
+      remediationName: 'CNXC_EnableLoadBalancerLogging',
       scope: RemediationScope.GLOBAL,
       resourceIdName: 'ResourceId',
       resourceIdRegex: String.raw`(.*)$`,
       updateDescription: HardCodedString.of('Enabled Load Balancer Logging'),
-      header: 'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',      
+      header:
+        'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',
     });
   }
 

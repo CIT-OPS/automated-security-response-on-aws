@@ -1402,10 +1402,10 @@ export class RemediationRunbookStack extends cdk.Stack {
     }
 
     //-----------------------
-    // ConfigureS3ServerAccessLogging
+    // CNXC_ConfigureS3ServerAccessLogging
     //
     {
-      const remediationName = 'ConfigureS3ServerAccessLogging';
+      const remediationName = 'CNXC_ConfigureS3ServerAccessLogging';
       const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
 
       const remediationPolicy = new PolicyStatement();
@@ -1447,10 +1447,10 @@ export class RemediationRunbookStack extends cdk.Stack {
     }
 
     //-----------------------
-    // EnableCloudfrontLogging
+    // CNXC_EnableCloudfrontLogging
     //
     {
-      const remediationName = 'EnableCloudfrontLogging';
+      const remediationName = 'CNXC_EnableCloudfrontLogging';
       const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
 
       const remediationPolicy = new PolicyStatement();
@@ -1498,10 +1498,10 @@ export class RemediationRunbookStack extends cdk.Stack {
     }
 
     //-----------------------
-    // EnableLoadBalancerLogging
+    // CNXC_EnableLoadBalancerLogging
     //
     {
-      const remediationName = 'EnableLoadBalancerLogging';
+      const remediationName = 'CNXC_EnableLoadBalancerLogging';
       const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
 
       const remediationPolicy = new PolicyStatement();
@@ -1549,10 +1549,10 @@ export class RemediationRunbookStack extends cdk.Stack {
     }
 
     //-----------------------
-    // EnableDynamoDB_PITR
+    // CNXC_EnableDynamoDB_PITR
     //
     {
-      const remediationName = 'EnableDynamoDB_PITR';
+      const remediationName = 'CNXC_EnableDynamoDB_PITR';
       const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
 
       const remediationPolicy = new PolicyStatement();
@@ -1590,12 +1590,11 @@ export class RemediationRunbookStack extends cdk.Stack {
       };
     }
 
-    
     //-----------------------
-    // EnableStepFunctionLogging
+    // CNXC_EnableStepFunctionLogging
     //
     {
-      const remediationName = 'EnableStepFunctionLogging';
+      const remediationName = 'CNXC_EnableStepFunctionLogging';
       const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
 
       const remediationPolicy1 = new PolicyStatement();
@@ -1617,7 +1616,7 @@ export class RemediationRunbookStack extends cdk.Stack {
       inlinePolicy.addStatements(remediationPolicy3);
 
       const remediationPolicy4 = new PolicyStatement();
-      remediationPolicy4.addActions('logs:*','cloudwatch:*');
+      remediationPolicy4.addActions('logs:*', 'cloudwatch:*');
       remediationPolicy4.effect = Effect.ALLOW;
       remediationPolicy4.addResources('*');
       inlinePolicy.addStatements(remediationPolicy4);
@@ -1651,12 +1650,11 @@ export class RemediationRunbookStack extends cdk.Stack {
       };
     }
 
-
     //-----------------------
-    // EnableAPIGatewayLogging
+    // CNXC_EnableAPIGatewayLogging
     //
     {
-      const remediationName = 'EnableAPIGatewayLogging';
+      const remediationName = 'CNXC_EnableAPIGatewayLogging';
       const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
 
       const remediationPolicy1 = new PolicyStatement();
@@ -1678,10 +1676,52 @@ export class RemediationRunbookStack extends cdk.Stack {
       inlinePolicy.addStatements(remediationPolicy3);
 
       const remediationPolicy4 = new PolicyStatement();
-      remediationPolicy4.addActions('logs:*','cloudwatch:*');
+      remediationPolicy4.addActions('logs:*', 'cloudwatch:*');
       remediationPolicy4.effect = Effect.ALLOW;
       remediationPolicy4.addResources('*');
       inlinePolicy.addStatements(remediationPolicy4);
+
+      new SsmRole(props.roleStack, 'RemediationRole ' + remediationName, {
+        solutionId: props.solutionId,
+        ssmDocName: remediationName,
+        remediationPolicy: inlinePolicy,
+        remediationRoleName: `${remediationRoleNameBase}${remediationName}`,
+      });
+
+      RunbookFactory.createRemediationRunbook(this, 'ASR ' + remediationName, {
+        ssmDocName: remediationName,
+        ssmDocPath: ssmdocs,
+        ssmDocFileName: `${remediationName}.yaml`,
+        scriptPath: `${ssmdocs}/scripts`,
+        solutionVersion: props.solutionVersion,
+        solutionDistBucket: props.solutionDistBucket,
+        solutionId: props.solutionId,
+      });
+      const childToMod = inlinePolicy.node.findChild('Resource') as CfnPolicy;
+      childToMod.cfnOptions.metadata = {
+        cfn_nag: {
+          rules_to_suppress: [
+            {
+              id: 'W12',
+              reason: 'Resource * is required for to allow remediation for any resource.',
+            },
+          ],
+        },
+      };
+    }
+
+    //-----------------------
+    // CNXC_EnableDynamoDB_DeleteProtection
+    //
+    {
+      const remediationName = 'CNXC_EnableDynamoDB_DeleteProtection';
+      const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
+
+      const remediationPolicy = new PolicyStatement();
+      remediationPolicy.addActions('dynamodb:DescribeTable', 'dynamodb:UpdateTable');
+      remediationPolicy.effect = Effect.ALLOW;
+      remediationPolicy.addResources('*');
+      inlinePolicy.addStatements(remediationPolicy);
 
       new SsmRole(props.roleStack, 'RemediationRole ' + remediationName, {
         solutionId: props.solutionId,
@@ -1730,6 +1770,48 @@ export class RemediationRunbookStack extends cdk.Stack {
       remediationPolicy2.effect = Effect.ALLOW;
       remediationPolicy2.addResources('*');
       inlinePolicy.addStatements(remediationPolicy2);
+
+      new SsmRole(props.roleStack, 'RemediationRole ' + remediationName, {
+        solutionId: props.solutionId,
+        ssmDocName: remediationName,
+        remediationPolicy: inlinePolicy,
+        remediationRoleName: `${remediationRoleNameBase}${remediationName}`,
+      });
+
+      RunbookFactory.createRemediationRunbook(this, 'ASR ' + remediationName, {
+        ssmDocName: remediationName,
+        ssmDocPath: ssmdocs,
+        ssmDocFileName: `${remediationName}.yaml`,
+        scriptPath: `${ssmdocs}/scripts`,
+        solutionVersion: props.solutionVersion,
+        solutionDistBucket: props.solutionDistBucket,
+        solutionId: props.solutionId,
+      });
+      const childToMod = inlinePolicy.node.findChild('Resource') as CfnPolicy;
+      childToMod.cfnOptions.metadata = {
+        cfn_nag: {
+          rules_to_suppress: [
+            {
+              id: 'W12',
+              reason: 'Resource * is required for to allow remediation for any resource.',
+            },
+          ],
+        },
+      };
+    }
+
+    //-----------------------------------------
+    // CNXC_AssignWAFToResource
+    //
+    {
+      const remediationName = 'CNXC_AssignWAFToResource';
+      const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
+
+      const remediationPolicy1 = new PolicyStatement();
+      remediationPolicy1.addActions('waf:*', 'wafv2:*', 'cloudfront:*', 'execute-api:*');
+      remediationPolicy1.effect = Effect.ALLOW;
+      remediationPolicy1.addResources('*');
+      inlinePolicy.addStatements(remediationPolicy1);
 
       new SsmRole(props.roleStack, 'RemediationRole ' + remediationName, {
         solutionId: props.solutionId,
@@ -1837,36 +1919,6 @@ export class RemediationRunbookStack extends cdk.Stack {
         },
       };
     }
-    //-----------------------------------------
-    // ASR-AssignWAFToResource
-    //
-    {
-      const remediationName = 'AssignWAFToResource';
-      const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
-
-      const remediationPermsEc2 = new PolicyStatement();
-      remediationPermsEc2.addActions(
-        'waf:*',
-        'execute-api:*',
-      );
-      remediationPermsEc2.effect = Effect.ALLOW;
-      remediationPermsEc2.addResources('*');
-      inlinePolicy.addStatements(remediationPermsEc2);
-
-      const childToMod = inlinePolicy.node.findChild('Resource') as CfnPolicy;
-      childToMod.cfnOptions.metadata = {
-        cfn_nag: {
-          rules_to_suppress: [
-            {
-              id: 'W12',
-              reason: 'Resource * is required for to allow remediation for *any* resource.',
-            },
-          ],
-        },
-      };
-    }
-
-
     //=========================================================================
     // The following runbooks are copied from AWS-owned documents to make them
     //   available to GovCloud and China partition customers. The

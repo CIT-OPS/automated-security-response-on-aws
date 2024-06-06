@@ -29,13 +29,15 @@ Aspects.of(app).add(new AwsSolutionsChecks());
 // Security Standard and Control Id. See cis-member-stack
 const remediations: IControl[] = [
   { control: 'AutoScaling.1' },
+  { control: 'APIGateway.1' }, // CNXC API Gateway REST and WebSocket API execution logging should be enabled
+  { control: 'APIGateway.3', executes: 'APIGateway.1' }, // CNXC API Gateway REST API stages should have AWS X-Ray tracing enabled
+  { control: 'APIGateway.4' }, // CNXC API Gateway REST API stages should have WAF enabled
   { control: 'CloudFormation.1' },
+  { control: 'CloudFront.1' },
+  { control: 'CloudFront.3', executes: 'CloudFront.1' }, // CNXC CloudFront distributions should require encryption in transit
+  { control: 'CloudFront.5', executes: 'CloudFront.1' }, // CNXC CloudFront distributions should have logging enabled
+  { control: 'CloudFront.6', executes: 'APIGateway.4' }, // CNXC CloudFront distributions should have WAF enabled
   { control: 'CloudFront.12' },
-  { control: 'APIGateway.1' },                            // CNXC API Gateway REST and WebSocket API execution logging should be enabled
-  { control: 'APIGateway.3', executes: 'APIGateway.1'},   // CNXC API Gateway REST API stages should have AWS X-Ray tracing enabled
-  { control: 'APIGateway.9', executes: 'APIGateway.1'},   // CNXC API Gateway REST API Access logging should be configured
-  { control: 'CloudFront.3', executes: 'CloudFront.1' },  // CNXC CloudFront distributions should require encryption in transit
-  { control: 'CloudFront.5', executes: 'CloudFront.1' },  // CNXC CloudFront distributions should have logging enabled
   { control: 'CloudTrail.1' },
   { control: 'CloudTrail.2' },
   { control: 'CloudTrail.3', executes: 'CloudTrail.1' },
@@ -61,6 +63,7 @@ const remediations: IControl[] = [
   { control: 'CodeBuild.5' },
   { control: 'Config.1' },
   { control: 'DynamoDB.2' }, // CNXC DynamoDB tables should have point-in-time recovery enabled
+  { control: 'DynamoDB.6' }, // CNXC DynamoDB tables should have deletion protection enabled
   { control: 'EC2.1' },
   { control: 'EC2.2' },
   { control: 'EC2.4' },
@@ -69,11 +72,11 @@ const remediations: IControl[] = [
   { control: 'EC2.8' },
   { control: 'EC2.13' },
   { control: 'EC2.14', executes: 'EC2.13' },
-  { control: 'ELB.5' },
   { control: 'EC2.15' },
   { control: 'EC2.18' },
   { control: 'EC2.19' },
   { control: 'EC2.23' },
+  { control: 'ELB.5' }, // CNXC ELBv2 Load Balancers should have access logging enabled
   { control: 'IAM.3' },
   { control: 'IAM.7' },
   { control: 'IAM.8' },
@@ -101,7 +104,6 @@ const remediations: IControl[] = [
   { control: 'Redshift.3' },
   { control: 'Redshift.4' },
   { control: 'Redshift.6' },
-  { control: 'SNS.2' },
   { control: 'S3.1' },
   { control: 'S3.2' },
   { control: 'S3.3', executes: 'S3.2' },
@@ -117,9 +119,9 @@ const remediations: IControl[] = [
   { control: 'SecretsManager.4' },
   { control: 'SNS.1' },
   { control: 'SNS.2' },
+  { control: 'StepFunctions.1' }, // CNXC Step Function Logging
   { control: 'SQS.1' },
   { control: 'SSM.4' },
-  { control: 'StepFunctions.1' },    // CNXC Step Function Logging
 ];
 
 const adminStack = new SecurityControlsPlaybookPrimaryStack(app, 'SCStack', {

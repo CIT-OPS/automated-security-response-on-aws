@@ -1,15 +1,14 @@
 schemaVersion: '0.3'
 description: |
-  ### Document name - ASR-EnableSNSDeliveryLogging
+  ### Document name - ASR-EnableDynamoDB_DeleteProtection
 
   ## What does this document do?
-  Enables appropriate SNS Delivery Logging, creating roles if required for SNS.2
-
+  Enables Delete Protection on a DynamoDB Table:
+  * Turns on Delete Protection on a DynamoDB Table for specified table.
 
   ## Input Parameters
   * AutomationAssumeRole: (Required) The Amazon Resource Name (ARN) of the AWS Identity and Access Management (IAM) role that allows Systems Manager Automation to perform the actions on your behalf.
-  * SNSTopicArn: (Required) The Resource ID
-  * Region: (Required) Finding Region
+  * TableArn: Table arn to set PITR Recovery on
 
   ## Output Parameters
   * Remediation.Output: STDOUT and messages from the remediation steps.
@@ -20,14 +19,10 @@ parameters:
     type: String
     description: (Required) The ARN of the role that allows Automation to perform the actions on your behalf.
     allowedPattern: '^arn:(?:aws|aws-us-gov|aws-cn):iam::\d{12}:role/[\w+=,.@-]+$'
-  SNSTopicArn:
+  TableArn:
     type: String
-    description: The ARN of the resource
+    description: The ARN of a DynamoDB table to set Delete Protection on
     allowedPattern: '(.*)$'
-  Region:
-    type: String
-    description: The REGION of the resource
-    allowedPattern: '^[a-z]{2}(?:-gov)?-[a-z]+-\d$'
 
 outputs:
   - Remediation.Output
@@ -37,14 +32,15 @@ mainSteps:
     action: 'aws:executeScript'
     outputs:
       - Name: Output
-        Selector: $.Payload.response
+        Selector: $.Payload
         Type: StringMap
     inputs:
       InputPayload:
-        ResourceId: '{{SNSTopicArn}}'
-        Region: '{{Region}}'
+        tableArn: '{{TableArn}}'
+        tableRegion: '{{global:REGION}}'
       Runtime: python3.8
-      Handler: runbook_handler
+      Handler: lambda_handler
       Script: |-
-        %%SCRIPT=EnableSNSDeliveryLogging.py%%
+        %%SCRIPT=CNXC_EnableDynamoDB_DeleteProtection.py%%
+
     isEnd: true

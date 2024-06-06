@@ -1,4 +1,6 @@
-// CONCENTRIX CODE
+/* eslint-disable header/header */
+// Copyright CONCENTRIX. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
 import { Construct } from 'constructs';
 import { ControlRunbookDocument, ControlRunbookProps, RemediationScope } from './control_runbook';
 import { PlaybookProps } from '../lib/control_runbooks-construct';
@@ -13,20 +15,21 @@ import {
 } from '@cdklabs/cdk-ssm-documents';
 
 export function createControlRunbook(scope: Construct, id: string, props: PlaybookProps): ControlRunbookDocument {
-  return new EnableStepFunctionLoggingDocument(scope, id, { ...props, controlId: 'StepFunctions.1' });
+  return new CNXC_EnableStepFunctionLoggingDocument(scope, id, { ...props, controlId: 'StepFunctions.1' });
 }
 
-class EnableStepFunctionLoggingDocument extends ControlRunbookDocument {
+class CNXC_EnableStepFunctionLoggingDocument extends ControlRunbookDocument {
   constructor(scope: Construct, id: string, props: ControlRunbookProps) {
     super(scope, id, {
       ...props,
       securityControlId: 'StepFunctions.1',
-      remediationName: 'EnableStepFunctionLogging',
+      remediationName: 'CNXC_EnableStepFunctionLogging',
       scope: RemediationScope.GLOBAL,
       resourceIdName: 'ResourceId',
       resourceIdRegex: String.raw`(.*)$`,
       updateDescription: HardCodedString.of('Enabled Stepfunction logging'),
-      header: 'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',      
+      header:
+        'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',
     });
   }
 

@@ -1,4 +1,6 @@
-// CONCENTRIX CODE
+/* eslint-disable header/header */
+// Copyright CONCENTRIX. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
 import { Construct } from 'constructs';
 import { ControlRunbookDocument, ControlRunbookProps, RemediationScope } from './control_runbook';
 import { PlaybookProps } from '../lib/control_runbooks-construct';
@@ -13,24 +15,22 @@ import {
 } from '@cdklabs/cdk-ssm-documents';
 
 export function createControlRunbook(scope: Construct, id: string, props: PlaybookProps): ControlRunbookDocument {
-  return new EnableAPIGatewayLoggingDocument(scope, id, { ...props, controlId: 'APIGateway.1' });
+  return new CNXC_EnableAPIGatewayLoggingDocument(scope, id, { ...props, controlId: 'APIGateway.1' });
 }
 
-class EnableAPIGatewayLoggingDocument extends ControlRunbookDocument {
+class CNXC_EnableAPIGatewayLoggingDocument extends ControlRunbookDocument {
   constructor(scope: Construct, id: string, props: ControlRunbookProps) {
     super(scope, id, {
       ...props,
       securityControlId: 'APIGateway.1',
-      otherControlIds: [
-        'APIGateway.3',
-        'APIGateway.9',
-      ],
-      remediationName: 'EnableAPIGatewayLogging',
+      otherControlIds: ['APIGateway.3', 'APIGateway.9'],
+      remediationName: 'CNXC_EnableAPIGatewayLogging',
       scope: RemediationScope.GLOBAL,
       resourceIdName: 'ResourceId',
       resourceIdRegex: String.raw`(.*)$`,
       updateDescription: HardCodedString.of('Enabled API Gateway execution logging'),
-      header: 'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',      
+      header:
+        'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',
     });
   }
 

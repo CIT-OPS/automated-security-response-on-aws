@@ -1,12 +1,12 @@
 {
     "WebACL": {
-        "Name": "SHARR-WAF",
+        "Name": "ASR-WAF",
         "Id": "169e2ff6-6364-45cc-ab34-77f453532f48",
-        "ARN": "arn:aws:wafv2:us-east-1:234772128127:regional/webacl/SHARR-WAF/169e2ff6-6364-45cc-ab34-77f453532f48",
+        "ARN": "arn:aws:wafv2:us-east-1:234772128127:regional/webacl/ASR-WAF/169e2ff6-6364-45cc-ab34-77f453532f48",
         "DefaultAction": {
             "Allow": {}
         },
-        "Description": "Default SHARR Created WAF with basic protection rules",
+        "Description": "Default ASR Created WAF with basic protection rules",
         "Rules": [
             {
                 "Name": "AWS-AWSManagedRulesAmazonIpReputationList",
@@ -84,11 +84,11 @@
         "VisibilityConfig": {
             "SampledRequestsEnabled": true,
             "CloudWatchMetricsEnabled": true,
-            "MetricName": "SHARR-WAF"
+            "MetricName": "ASR-WAF"
         },
         "Capacity": 1125,
         "ManagedByFirewallManager": false,
-        "LabelNamespace": "awswaf:234772128127:webacl:SHARR-WAF:"
+        "LabelNamespace": "awswaf:234772128127:webacl:ASR-WAF:"
     },
     "LockToken": "9461b2ce-bede-4720-b155-9a2a3622fc60"
 }

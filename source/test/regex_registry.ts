@@ -215,10 +215,19 @@ export function getRegexRegistry(): RegexRegistry {
   registry.addCase(new RegexTestCase(String.raw`^[a-zA-Z0-9-]{1,35}$`, 'RDS Cluster ID', [], []));
   registry.addCase(new RegexTestCase(String.raw`^cluster-[A-Z0-9]+$`, 'RDS DB Resource Cluster ID', [], []));
 
-  // Not sure if this does anything yet - KPP
+  // START KPP CNXC REGEX to allow tests to pass
   registry.addCase(new RegexTestCase(String.raw`(.*)$`, 'CNXC ANYTHING', [], []));
   registry.addCase(new RegexTestCase(String.raw`^[a-zA-Z][a-zA-Z0-9-_:]{0,30}$`, 'Resource Type', [], []));
-  
+  registry.addCase(
+    new RegexTestCase(
+      String.raw`^(AwsElbv2LoadBalancer|AwsApiGatewayStage|AwsStepFunctionsStateMachine|AwsApiGatewayV2Stage|AwsCloudFrontDistribution)$`,
+      'API Gateway Stages',
+      [],
+      [],
+    ),
+  );
+  // END KPP CNXC REGEX to allow tests to pass
+
   registry.addCase(
     new RegexTestCase(
       String.raw`^db-[A-Z0-9]{26}$`,

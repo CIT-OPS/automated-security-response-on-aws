@@ -1,4 +1,6 @@
-// CONCENTRIX CODE
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { Construct } from 'constructs';
 import { ControlRunbookDocument, ControlRunbookProps, RemediationScope } from './control_runbook';
 import { PlaybookProps } from '../lib/control_runbooks-construct';
@@ -10,30 +12,27 @@ import {
   HardCodedString,
   Output,
   StringVariable,
-} from '@cdklabs/cdk-ssm-documents';
+} from '@cdklabs/cdk-ssm-documents'; // CNXC Changed the import path
 
 export function createControlRunbook(scope: Construct, id: string, props: PlaybookProps): ControlRunbookDocument {
-  return new EnableAPIGatewayWAF(scope, id, { ...props, controlId: 'APIGateway.4' });
+  return new EnableCloudFrontAPIGWWAFDocument(scope, id, { ...props, controlId: 'APIGateway.4' });
 }
 
-class EnableAPIGatewayWAF extends ControlRunbookDocument {
-  constructor(scope: Construct, id: string, props: ControlRunbookProps) {
-    super(scope, id, {
+export class EnableCloudFrontAPIGWWAFDocument extends ControlRunbookDocument {
+  constructor(stage: Construct, id: string, props: ControlRunbookProps) {
+    super(stage, id, {
       ...props,
       securityControlId: 'APIGateway.4',
-    //   otherControlIds: [
-    //     'APIGateway.3',
-    //     'APIGateway.9',
-    //   ],
-      remediationName: 'AssignWAFToResource',
+      otherControlIds: ['CloudFront.6'],
+      remediationName: 'CNXC_AssignWAFToResource',
       scope: RemediationScope.GLOBAL,
       resourceIdName: 'ResourceId',
       resourceIdRegex: String.raw`(.*)$`,
-      updateDescription: HardCodedString.of('Enabled API Gateway WAF Association'),
-      header: 'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',      
+      updateDescription: HardCodedString.of('Configured WAF on resource'),
     });
   }
 
+  // Start CNXC Changes
   /** @override */
   protected getParseInputStepOutputs(): Output[] {
     const outputs = super.getParseInputStepOutputs();
@@ -92,5 +91,6 @@ class EnableAPIGatewayWAF extends ControlRunbookDocument {
       outputs: [],
       isEnd: true,
     });
+    // End CNXC Changes
   }
 }

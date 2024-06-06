@@ -1,0 +1,84 @@
+{
+  "reportversion": "1",
+  "toxversion": "4.15.0",
+  "platform": "darwin",
+  "host": "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa",
+  "testenvs": {
+    "format": {
+      "python": {
+        "implementation": "CPython",
+        "version_info": [
+          3,
+          9,
+          13,
+          "final",
+          0
+        ],
+        "version": "3.9.13 (v3.9.13:6de2ca5339, May 17 2022, 11:37:23) \n[Clang 13.0.0 (clang-1300.0.29.30)]",
+        "is_64": true,
+        "sysplatform": "darwin",
+        "extra_version_info": null,
+        "executable": "/Library/Frameworks/Python.framework/Versions/3.9/bin/python3.9"
+      },
+      "installed_packages": [
+        "black==24.4.2",
+        "click==8.1.7",
+        "isort==5.13.2",
+        "mypy-extensions==1.0.0",
+        "packaging==24.0",
+        "pathspec==0.12.1",
+        "pip==24.0",
+        "platformdirs==4.2.2",
+        "setuptools==69.5.1",
+        "tomli==2.0.1",
+        "typing_extensions==4.11.0",
+        "wheel==0.43.0"
+      ],
+      "result": {
+        "success": false,
+        "exit_code": 1,
+        "duration": 0.736153792
+      },
+      "test": [
+        {
+          "command": [
+            "/Users/ken/codecnxc/security/automated-security-response-on-aws/.tox/format/bin/isort",
+            "--profile",
+            "black",
+            "--check",
+            "."
+          ],
+          "output": "Skipped 4 files\r\n",
+          "err": "ERROR: /Users/ken/codecnxc/security/automated-security-response-on-aws/source/remediation_runbooks/scripts/CNXC_EnableDynamoDB_PITR.py Imports are incorrectly sorted and/or formatted.\r\nERROR: /Users/ken/codecnxc/security/automated-security-response-on-aws/source/remediation_runbooks/scripts/CNXC_CreateServerAccessLogging_ApplyConfig.py Imports are incorrectly sorted and/or formatted.\r\nERROR: /Users/ken/codecnxc/security/automated-security-response-on-aws/source/remediation_runbooks/scripts/CNXC_AssignWAF.py Imports are incorrectly sorted and/or formatted.\r\nERROR: /Users/ken/codecnxc/security/automated-security-response-on-aws/source/remediation_runbooks/scripts/CNXC_CreateServerAccessLogging_CreateDestBucket.py Imports are incorrectly sorted and/or formatted.\r\nERROR: /Users/ken/codecnxc/security/automated-security-response-on-aws/source/remediation_runbooks/scripts/CNXC_CreateWAF.py Imports are incorrectly sorted and/or formatted.\r\nERROR: /Users/ken/codecnxc/security/automated-security-response-on-aws/source/remediation_runbooks/scripts/CNXC_EnableSNSDeliveryLogging.py Imports are incorrectly sorted and/or formatted.\r\nERROR: /Users/ken/codecnxc/security/automated-security-response-on-aws/source/remediation_runbooks/scripts/CNXC_ApplyGenericLogging.py Imports are incorrectly sorted and/or formatted.\r\nERROR: /Users/ken/codecnxc/security/automated-security-response-on-aws/source/remediation_runbooks/scripts/CNXC_CreateGenericLoggingBucket.py Imports are incorrectly sorted and/or formatted.\r\nERROR: /Users/ken/codecnxc/security/automated-security-response-on-aws/source/remediation_runbooks/scripts/CNXC_CreateCloudfrontLoggingBucket.py Imports are incorrectly sorted and/or formatted.\r\n",
+          "retcode": 1,
+          "elapsed": 0.431967209,
+          "show_on_standard": true,
+          "run_id": "commands[0]",
+          "start": 0.451312291,
+          "end": 0.8832795
+        }
+      ],
+      "setup": [
+        {
+          "command": [
+            "/Users/ken/codecnxc/security/automated-security-response-on-aws/.tox/format/bin/python",
+            "-m",
+            "pip",
+            "freeze",
+            "--all"
+          ],
+          "output": "black==24.4.2\r\nclick==8.1.7\r\nisort==5.13.2\r\nmypy-extensions==1.0.0\r\npackaging==24.0\r\npathspec==0.12.1\r\npip==24.0\r\nplatformdirs==4.2.2\r\nsetuptools==69.5.1\r\ntomli==2.0.1\r\ntyping_extensions==4.11.0\r\nwheel==0.43.0\r\n",
+          "err": "",
+          "retcode": 0,
+          "elapsed": 0.269202084,
+          "show_on_standard": false,
+          "run_id": "freeze",
+          "start": 0.180007041,
+          "end": 0.449209125
+        }
+      ]
+    },
+    "lint": {},
+    ".pkg": {}
+  }
+}
