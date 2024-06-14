@@ -1091,7 +1091,12 @@ def runbook_handler(event, context):
     s3_client = boto3.client("s3")
     bucketName = event["BucketName"]
     destBucket = event["LoggingBucketName"]
-    targetPrefix = "access_logs/s3/" + bucketName + "/"
+    targetPrefix = (
+        "access_logs/s3/"
+        + bucketName
+        + "/"
+        + "[YYYY]-[MM]-[DD]/[hh]-[mm]/[UniqueString]"
+    )
 
     if bucketName == destBucket:
         return {
@@ -15310,7 +15315,7 @@ def lambda_handler(event, _):
       "Properties": {
         "CreateIntervalSeconds": 1,
         "DeleteIntervalSeconds": 0,
-        "DocumentPropertiesHash": "d4e9718cc4b5114a9763b473846abdb364b714457c36e21bc5f9549fbd7b5ab3",
+        "DocumentPropertiesHash": "d26f787d8ac1b8dae4b200fe120db966a1723459b55ac765cf16f7917b9516b9",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },
@@ -15588,7 +15593,7 @@ def lambda_handler(event, _):
       "Properties": {
         "CreateIntervalSeconds": 0,
         "DeleteIntervalSeconds": 0.5,
-        "DocumentPropertiesHash": "d4e9718cc4b5114a9763b473846abdb364b714457c36e21bc5f9549fbd7b5ab3",
+        "DocumentPropertiesHash": "d26f787d8ac1b8dae4b200fe120db966a1723459b55ac765cf16f7917b9516b9",
         "ServiceToken": {
           "Ref": "WaitProviderServiceToken",
         },

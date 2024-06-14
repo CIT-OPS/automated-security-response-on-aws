@@ -59,7 +59,7 @@ mainSteps:
       Runtime: python3.8
       Handler: runbook_handler
       Script: |-
-        %%SCRIPT=CNXC_CreateServerAccessLogging_CreateDestBucket.py%%
+        %%SCRIPT=CNXC_CreateS3ServerAccessLoggingBucket.py%%
     isEnd: false
   - name: Remediation
     action: 'aws:executeScript'
@@ -86,5 +86,5 @@ mainSteps:
       Runtime: python3.8
       Handler: runbook_handler
       Script: |-
-        %%SCRIPT=CNXC_CreateServerAccessLogging_ApplyConfig.py%%
+        %%SCRIPT=CNXC_CreateS3ServerAccessConfiguration.py%%
     isEnd: true

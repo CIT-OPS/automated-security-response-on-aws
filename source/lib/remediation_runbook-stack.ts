@@ -1808,7 +1808,7 @@ export class RemediationRunbookStack extends cdk.Stack {
       const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
 
       const remediationPolicy1 = new PolicyStatement();
-      remediationPolicy1.addActions('waf:*', 'wafv2:*', 'cloudfront:*', 'execute-api:*');
+      remediationPolicy1.addActions('waf:*', 'wafv2:*', 'cloudfront:*', 'apigateway:*');
       remediationPolicy1.effect = Effect.ALLOW;
       remediationPolicy1.addResources('*');
       inlinePolicy.addStatements(remediationPolicy1);

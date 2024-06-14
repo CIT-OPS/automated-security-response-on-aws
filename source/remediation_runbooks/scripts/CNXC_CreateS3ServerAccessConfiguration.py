@@ -9,6 +9,9 @@ def enableAccessLogging(s3, bucketName, storageBucket, targetPrefix):
             "LoggingEnabled": {
                 "TargetBucket": storageBucket,
                 "TargetPrefix": targetPrefix,
+                "TargetObjectKeyFormat": {
+                    "PartitionedPrefix": {"PartitionDateSource": "EventTime"}
+                },
             }
         },
     )
@@ -18,9 +21,21 @@ def runbook_handler(event, context):
     s3_client = boto3.client("s3")
     bucketName = event["BucketName"]
     destBucket = event["LoggingBucketName"]
-    targetPrefix = "access_logs/s3/" + bucketName + "/"
+    # targetPrefix = f"access_logs/s3/{bucketName}/"
+    targetPrefix = ""
 
     if bucketName == destBucket:
+        return {
+            "output": {
+                "message": "This bucket is exempt from logging as it would create a circular log effect",
+                "resourceBucketName": bucketName,
+                "LoggingBucketName": destBucket,
+                "LoggingPrefix": targetPrefix,
+                "status": "SUPPRESSED",
+            }
+        }
+
+    if "s3-access-logs" in bucketName:
         return {
             "output": {
                 "message": "This bucket is exempt from logging as it would create a circular log effect",

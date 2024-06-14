@@ -111,7 +111,8 @@ const remediations: IControl[] = [
   { control: 'S3.5' },
   { control: 'S3.6' },
   { control: 'S3.8', executes: 'S3.2' },
-  { control: 'S3.9', executes: 'CloudTrail.7' },
+  // { control: 'S3.9', executes: 'CloudTrail.7' }, // Dont Use AWS Version Use CNXC Version
+  { control: 'S3.9' }, // CNXC S3 buckets should have server access logging enabled
   { control: 'S3.11' },
   { control: 'S3.13' },
   { control: 'SecretsManager.1' },

@@ -28,6 +28,12 @@ elif [ "$ACCOUNT_IDENTIFIER" == "645520830401" ]; then
     SECHUB_ACCOUNT='217745949876'
     TEST_ACCOUNT='217745949876'
     REGIONS=( "us-east-1" "us-east-2" "sa-east-1" "eu-west-2" "ca-central-1" "us-west-2" )
+elif [ "$ACCOUNT_IDENTIFIER" == "194039877044" ]; then
+    #CXTECH MPA
+    ORGANIZATION_ID="o-p9357gtyl8"
+    SECHUB_ACCOUNT='332241576022'
+    TEST_ACCOUNT='802214760415'
+    REGIONS=( "us-east-1" "us-east-2" "us-west-1" "us-west-2" "ca-central-1" "ap-southeast-1" "ap-southeast-2" "eu-west-2" )
 else
     echo "The last 12 characters do not match."
 fi
@@ -165,7 +171,7 @@ aws cloudformation update-stack-set \
 --stack-set-name AWSControlTower-SHARR-Member \
 --description "(SO0111) AWS Security Hub Automated Response & Remediation MEMBER Stack, $DIST_SOLUTION_NAME $DIST_VERSION" \
 --template-url "https://$DIST_OUTPUT_BUCKET-reference.s3.amazonaws.com/$DIST_SOLUTION_NAME/$DIST_VERSION/aws-sharr-member.template" \
---parameters ParameterKey=CreateS3BucketForRedshiftAuditLogging,UsePreviousValue=true ParameterKey=LoadAFSBPMemberStack,UsePreviousValue=true ParameterKey=LoadCIS120MemberStack,UsePreviousValue=true ParameterKey=LoadCIS140MemberStack,UsePreviousValue=true ParameterKey=LoadNIST80053MemberStack,UsePreviousValue=true ParameterKey=LoadPCI321MemberStack,UsePreviousValue=true ParameterKey=LoadSCMemberStack,UsePreviousValue=true ParameterKey=LogGroupName,UsePreviousValue=true ParameterKey=SecHubAdminAccount,UsePreviousValue=true \
+--parameters ParameterKey=CreateS3BucketForRedshiftAuditLogging,UsePreviousValue=false,ParameterValue=no ParameterKey=LoadAFSBPMemberStack,UsePreviousValue=false,ParameterValue=no ParameterKey=LoadCIS120MemberStack,UsePreviousValue=false,ParameterValue=no ParameterKey=LoadCIS140MemberStack,UsePreviousValue=false,ParameterValue=no ParameterKey=LoadNIST80053MemberStack,UsePreviousValue=false,ParameterValue=no ParameterKey=LoadPCI321MemberStack,UsePreviousValue=false,ParameterValue=no ParameterKey=LoadSCMemberStack,UsePreviousValue=false,ParameterValue=yes ParameterKey=LogGroupName,UsePreviousValue=true ParameterKey=SecHubAdminAccount,UsePreviousValue=true \
 --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
 --tags Key=Solution,Value=$DIST_SOLUTION_NAME Key=Version,Value=$DIST_VERSION Key=App,Value=SHARR \
 --operation-preferences FailureToleranceCount=49,MaxConcurrentCount=50,RegionConcurrencyType=PARALLEL \
