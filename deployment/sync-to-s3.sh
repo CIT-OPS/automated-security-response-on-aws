@@ -10,6 +10,11 @@ ACCOUNT_IDENTIFIER=${DIST_OUTPUT_BUCKET: -12}
 
 CREATE_BUCKETS=0
 
+I have an AWS Account 471112840695 that was onboarded about two weeks ago; I can see in AWS
+The Orca Security Role was used in the past hour; yet when I search for cloud accounts in the Orca Security console, I do not see the account listed. I have tried to refresh the list of accounts, but the account is still not listed. What could be the issue?
+The Business unit I am using is CXMS-ALL and I double checked that the account is tagged correctly for that BU.
+ORCA-BU1|Catalyst-ManagedServices
+
 # Now you can use the environment variables in your script
 echo "Output Bucket: $DIST_OUTPUT_BUCKET"
 echo "Version: $DIST_VERSION"
@@ -33,7 +38,7 @@ elif [ "$ACCOUNT_IDENTIFIER" == "194039877044" ]; then
     ORGANIZATION_ID="o-p9357gtyl8"
     SECHUB_ACCOUNT='332241576022'
     TEST_ACCOUNT='802214760415'
-    REGIONS=( "us-east-1" "us-east-2" "us-west-1" "us-west-2" "ca-central-1" "ap-southeast-1" "ap-southeast-2" "eu-west-2" )
+    REGIONS=("ap-southeast-1" "ap-southeast-2" "ca-central-1" "eu-central-1" "eu-north-1" "eu-west-1" "eu-west-2" "us-east-1" "us-east-2" "us-west-1" "us-west-2")
 else
     echo "The last 12 characters do not match."
 fi
