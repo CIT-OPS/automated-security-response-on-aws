@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@cdklabs/cdk-ssm-documents": "^0.0.46"
+  }
+}
