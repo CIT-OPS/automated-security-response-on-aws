@@ -38,3 +38,6 @@ __pycache__/
 
 # system
 .DS_Store
+deployment/awscli-update-*
+deployment/s3-file-names.txt
+source/test/__snapshots__/*.snap
