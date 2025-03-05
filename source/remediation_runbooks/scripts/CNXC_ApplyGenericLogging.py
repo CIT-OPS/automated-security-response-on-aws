@@ -1,740 +1,691 @@
-# import dis
-# import json
+import json
 import time
-from typing import Dict, List, Literal, TypedDict
 
-import boto3  # type: ignore
-from botocore.exceptions import ClientError  # type: ignore
+import boto3
+from botocore.exceptions import ClientError
 
-
-class Response(TypedDict):
-    Action: str
-    Message: str
+responses = {"EnableLogging": []}
 
 
-responses: Dict[Literal["EnableLogging"], List[Response]] = {}
-responses["EnableLogging"] = []
+def add_response(action, message):
+    """Helper to create response objects."""
+    return {"Action": action, "Message": message}
+
+
+def add_error(action, error_msg):
+    """Helper to create error response objects."""
+    return {"Action": action, "Message": f"ERROR {error_msg}"}
+
+
+def create_error_response(error_type, message):
+    """Create standardized error response."""
+    return {
+        "output": "EnableLogging",
+        "http_responses": {
+            "EnableLogging": [{"Action": error_type, "Message": message}]
+        },
+    }
+
+
+def createLogGroup(name, region, acct):
+    """Create CloudWatch log group and return ARN."""
+    result = []
+    try:
+        logs = boto3.client("logs", region_name=region)
+        try:
+            logs.create_log_group(logGroupName=name)
+            result.append(add_response("create_log_group", f"Created log group {name}"))
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ResourceAlreadyExistsException":
+                result.append(
+                    add_response("create_log_group", f"Log group {name} already exists")
+                )
+            else:
+                raise
+
+        arn = f"arn:aws:logs:{region}:{acct}:log-group:{name}"
+        return arn, result
+    except Exception as e:
+        result.append(add_error("create_log_group", str(e)))
+        return "", result
 
 
 def runbook_handler(event, context):
-    ResourceId = event["ResourceId"]
-    ResourceSplit = ResourceId.split(":")
-    serviceName = ResourceSplit[2]
-    if serviceName == "elasticloadbalancing":
-        serviceName = "elb"
-    region = event["Region"]
-    AwsAccountId = event["AccountId"]
-    ResourceType = event["ResourceType"]
+    """Handles AWS Config remediation runbook for enabling logging."""
+    try:
+        # Validate required fields
+        if "ResourceId" not in event:
+            raise ValueError("Missing required input: ResourceId")
 
-    loggingBucket = (
-        "asr-logging-" + serviceName + "-" + AwsAccountId + "-" + region.lower()
-    )
+        if "ResourceType" not in event:
+            raise ValueError("Missing required input: ResourceId")
 
-    responses["EnableLogging"].append(
-        {
-            "Action": "determine_logging_bucket",
-            "Message": f"Logging bucket will be {loggingBucket}",
+        res_type = event["ResourceType"]
+
+        if res_type == "AwsS3Bucket":
+            res_id = event["ResourceId"]
+            svc_name = "s3"
+        else:
+            res_id = event["ResourceId"]
+            res_split = res_id.split(":")
+            svc_name = res_split[2]
+
+        res_type_map = {
+            "elasticloadbalancing": "AwsElbv2LoadBalancer",
+            "elb": "AwsElbv2LoadBalancer",
+            "apigateway": "AwsApiGatewayStage",
+            "execute-api": "AwsApiGatewayV2Stage",
+            "states": "AwsStepFunctionsStateMachine",
+            "cloudfront": "AwsCloudFrontDistribution",
+            "s3": "AwsS3Bucket",
         }
-    )
+        res_type = res_type_map.get(svc_name, f"Unknown:{svc_name}")
 
-    if ResourceType == "AwsElbv2LoadBalancer":
-        client = boto3.client("elbv2", region_name=region)
-        try:
-            client.modify_load_balancer_attributes(
-                LoadBalancerArn=ResourceId,
-                Attributes=[
-                    {"Key": "access_logs.s3.enabled", "Value": "true"},
-                    {"Key": "access_logs.s3.bucket", "Value": loggingBucket},
-                ],
-            )
-            responses["EnableLogging"].append(
-                {
-                    "Action": "modify_load_balancer_attributes",
-                    "Message": f"ELB Resource {ResourceId} Modified for logging to {loggingBucket}",
-                }
-            )
-
-        except Exception as error:
-            responses["EnableLogging"].append(
-                {
-                    "Action": "enable_logging",
-                    "Message": f"ERROR Unable to set logging on AwsElbv2LoadBalancer - {error.response['Error']['Code']}",
-                }
-            )
-            pass
-
-    if ResourceType == "AwsApiGatewayStage":
-        try:
-            # Use V2 for Websocket and V1 for Rest
-            apigwclient = boto3.client("apigateway", region_name=region)
-            apigwArray = ResourceSplit[5].split("/")
-            ApiId = apigwArray[2]
-            stageName = apigwArray[4]
-
-            # Make sure API Gateway Account level settings have Cloudwatch Role
-            setupAPIGatewayAccountSettings(AwsAccountId, apigwclient)
-
-            # Get/Create Log Group for access and execution logging
-            accesslogGroupArn = createLogGroup(
-                "/aws/vendedlogs/APIGW-Access_" + ApiId + "/" + stageName,
-                region,
-                AwsAccountId,
-            )
-            # executelogGroupArn = createLogGroup('/aws/apigateway/execution/'+ApiId+'/'+stageName, region, AwsAccountId)
-
-            # Get the current Stage Info and figure out whats needed
-            response = apigwclient.get_stage(restApiId=ApiId, stageName=stageName)
-
-            # Access Logging required?
+        # Extract account ID
+        if "AccountId" in event and event["AccountId"]:
+            acct_id = event["AccountId"]
+        else:
             try:
-                accessLogSettings = response["accessLogSettings"]["destinationArn"]
-                if accessLogSettings != "":
-                    setAccessLogging = False
-                else:
-                    setAccessLogging = True
-            except Exception:
-                setAccessLogging = True
-                pass
+                acct_id = res_split[4]
+                if not acct_id or not acct_id.isdigit():
+                    raise ValueError("Invalid account ID in resource ARN")
+            except (IndexError, ValueError) as e:
+                raise ValueError(f"Unable to extract valid account ID: {str(e)}")
 
-            # Execute Logging Required?
-            try:
-                methodSettings = response["methodSettings"]["*/*"]["loggingLevel"]
-                if methodSettings == "OFF":
-                    setMethodLogging = True
-                else:
-                    setMethodLogging = False
-            except Exception:
-                setMethodLogging = True
-                pass
-
-            # XRay Tracing Required?
-            try:
-                xray = response["tracingEnabled"]
-                if xray is False:
-                    setXray = True
-                else:
-                    setXray = False
-            except Exception:
-                setXray = True
-                pass
-
-            # Build up an array of items to patch
-            PatchOperations = []
-            if setAccessLogging:
-                operation = {
-                    "op": "replace",
-                    "path": "/accessLogSettings/destinationArn",
-                    "value": accesslogGroupArn,
-                    # 'from': 'string'
-                }
-                PatchOperations.append(operation)
-                operation = {
-                    "op": "replace",
-                    "path": "/accessLogSettings/format",
-                    "value": '{ "requestId":"$context.requestId", "ip": "$context.identity.sourceIp", \
-                                "caller":"$context.identity.caller", "user":"$context.identity.user", \
-                                "requestTime":"$context.requestTime", \
-                                "httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath", \
-                                "status":"$context.status","protocol":"$context.protocol", \
-                                "responseLength":"$context.responseLength" }',
-                }
-                PatchOperations.append(operation)
-            if setXray:
-                operation = {
-                    "op": "replace",
-                    "path": "/tracingEnabled",
-                    "value": "true",
-                }
-                PatchOperations.append(operation)
-            if setMethodLogging:
-                operation = {
-                    "op": "replace",
-                    "path": "/*/*/logging/loglevel",
-                    "value": "ERROR",
-                }
-                PatchOperations.append(operation)
-
-            # If there are items to patch, then patch them!
-            if len(PatchOperations) > 0:
-                try:
-                    apigwclient.update_stage(
-                        restApiId=ApiId,
-                        stageName=stageName,
-                        patchOperations=PatchOperations,
-                    )
-                    responses["EnableLogging"].append(
-                        {
-                            "Action": "update_stage",
-                            "Message": f"API ID {ApiId} Stage {stageName} updated",
-                        }
-                    )
-                except Exception as error:
-                    responses["EnableLogging"].append(
-                        {
-                            "Action": "update_stage",
-                            "Message": f"ERROR - API ID {ApiId} Stage {stageName} not updated {error.response['Error']['Code']}",
-                        }
-                    )
-                    pass
+        # Determine region
+        if "Region" in event and event["Region"]:
+            region = event["Region"]
+        else:
+            if svc_name == "cloudfront" or "AwsCloudFrontDistribution" in event.get(
+                "ResourceType", ""
+            ):
+                region = "us-east-1"
             else:
-                responses["EnableLogging"].append(
-                    {
-                        "Action": "patch",
-                        "Message": "No Patch operations required for APIGateway - Why was remediation requested?",
-                    }
-                )
+                try:
+                    region = res_split[3] or "us-east-1"
+                except (IndexError, TypeError):
+                    region = "us-east-1"
 
-        except Exception as error:
+        # Convert elasticloadbalancing to elb for consistency
+        if svc_name == "elasticloadbalancing":
+            svc_name = "elb"
+
+        logging_bucket = event["LoggingBucket"]
+
+        # Log the extracted information
+        print(f"[INFO] Using account ID: {acct_id} for resource: {res_id}")
+        print(f"[INFO] Using region: {region} for resource: {res_id}")
+        print(f"[INFO] Using resource type: {res_type} for resource: {res_id}")
+        print(f"[INFO] Using logging bucket: {logging_bucket} for resource: {res_id}")
+
+        # Map resource types to handlers
+        handlers = {
+            "AwsElbv2LoadBalancer": lambda: handle_elbv2(
+                res_id, region, svc_name, acct_id
+            ),
+            "AwsApiGatewayStage": lambda: handle_api_gateway_stage(
+                res_split, region, acct_id
+            ),
+            "AwsStepFunctionsStateMachine": lambda: handle_step_functions(
+                res_split, res_id, region, acct_id
+            ),
+            "AwsApiGatewayV2Stage": lambda: handle_api_gateway_v2_stage(
+                res_split, region, acct_id
+            ),
+            "AwsCloudFrontDistribution": lambda: handle_cloudfront_distribution(
+                res_split, region, acct_id, logging_bucket
+            ),
+            "AwsS3Bucket": lambda: handle_s3_bucket(
+                res_id, region, acct_id, logging_bucket
+            ),
+        }
+
+        # Execute appropriate handler
+        if res_type in handlers:
+            responses["EnableLogging"].append(handlers[res_type]())
+        else:
             responses["EnableLogging"].append(
-                {
-                    "Action": "enable_logging",
-                    "Message": f"ERROR Unable to set logging on AwsApiGatewayStage - {error.response['Error']['Code']}",
-                }
-            )
-            pass
-
-    if ResourceType == "AwsStepFunctionsStateMachine":
-        try:
-            sfnclient = boto3.client("stepfunctions", region_name=region)
-
-            # arn:aws:states:us-east-1:529247589681:stateMachine:XPVA-SDN248-SHD-COMM-RetentionStateMachine
-            sfnName = ResourceSplit[6]
-
-            # Get the state machine info
-            response = sfnclient.describe_state_machine(stateMachineArn=ResourceId)
-            roleArn = response["roleArn"]
-            # logLevel = "OFF"
-            logGroupArn = ""
-
-            # a lot of crap just to get overrides
-            if "loggingConfiguration" in response:
-                loggingConfiguration = response["loggingConfiguration"]
-                # logLevel = loggingConfiguration["level"]
-                if "destinations" in loggingConfiguration:
-                    destinations = loggingConfiguration["destinations"]
-                    destination = destinations[0]  # limited to one
-                    if "cloudWatchLogsLogGroup" in destination:
-                        cloudWatchLogsLogGroup = destination["cloudWatchLogsLogGroup"]
-                        if "logGroupArn" in cloudWatchLogsLogGroup:
-                            logGroupArn = cloudWatchLogsLogGroup["logGroupArn"]
-
-            roleArray = roleArn.split("/")
-            roleName = roleArray[1]
-
-            if logGroupArn == "":
-                # Get/Create Log Group for access and execution logging
-                logGroupArn = (
-                    createLogGroup("/aws/SFNLog/" + sfnName, region, AwsAccountId)
-                    + ":*"
+                add_response(
+                    "ResourceTypeValidation", f"Unsupported resource type: {res_type}"
                 )
-
-            print(
-                f"[INFO] Role {roleName} will be updated for cloudwatch logs permissions"
             )
-            print(f"[INFO] StepFunction {sfnName} will be logged to {logGroupArn}")
 
-            # Attach Permission to Role
-            iamClient = boto3.client("iam")
+        return {"output": "EnableLogging", "http_responses": responses}
 
+    except ValueError as ve:
+        return create_error_response("ValidationError", str(ve))
+    except ClientError as ce:
+        return create_error_response(
+            "AWSError",
+            f"AWS API Error: {ce.response['Error']['Code']} - {ce.response['Error']['Message']}",
+        )
+    except Exception as e:
+        return create_error_response("UnexpectedError", f"Unexpected error: {str(e)}")
+
+
+def handle_elbv2(res_id, region, svc, acct):
+    """Configures logging for ELBv2 resources."""
+    if (
+        not res_id.startswith("arn:aws:elasticloadbalancing")
+        or not region
+        or svc != "elb"
+        or not acct.isdigit()
+    ):
+        return add_error("validation", "Invalid parameters for ELBv2 logging")
+
+    bucket = f"asr-logging-{svc}-{acct}-{region.lower()}"
+
+    try:
+        boto3.client("elbv2", region_name=region).modify_load_balancer_attributes(
+            LoadBalancerArn=res_id,
+            Attributes=[
+                {"Key": "access_logs.s3.enabled", "Value": "true"},
+                {"Key": "access_logs.s3.bucket", "Value": bucket},
+            ],
+        )
+        return add_response("modify_lb_attrs", f"ELB {res_id} now logs to {bucket}")
+    except ClientError as e:
+        return add_error(
+            "enable_logging",
+            f"{e.response['Error']['Code']}: {e.response['Error']['Message']}",
+        )
+    except Exception as e:
+        return add_error("enable_logging", f"Unexpected error: {str(e)}")
+
+
+def setupAPIGatewayAccountSettings(acct, client):
+    """Sets up API Gateway account settings for CloudWatch logging."""
+    result = []
+    ROLE_NAME = "APIGatewayLogWriterRole"
+    POLICY_ARN = (
+        "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+    )
+    ASSUME_ROLE = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"Service": ["apigateway.amazonaws.com"]},
+                "Action": ["sts:AssumeRole"],
+            }
+        ],
+    }
+
+    if "cloudwatchRoleArn" not in client.get_account():
+        iam = boto3.client("iam")
+        try:
+            iam.create_role(
+                RoleName=ROLE_NAME,
+                AssumeRolePolicyDocument=json.dumps(ASSUME_ROLE),
+                Description="Role for API Gateway CloudWatch Logs",
+            )
+            result.append(add_response("create_role", f"Role {ROLE_NAME} created"))
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "EntityAlreadyExists":
+                result.append(add_response("create_role", f"Role {ROLE_NAME} exists"))
+            else:
+                return [add_error("create_role", e.response["Error"]["Message"])]
+
+        try:
+            iam.attach_role_policy(RoleName=ROLE_NAME, PolicyArn=POLICY_ARN)
+            result.append(
+                add_response("attach_policy", f"Policy attached to {ROLE_NAME}")
+            )
+        except ClientError as e:
+            return [add_error("attach_policy", e.response["Error"]["Message"])]
+
+        try:
+            role_arn = f"arn:aws:iam::{acct}:role/{ROLE_NAME}"
+            client.update_account(
+                patchOperations=[
+                    {"op": "replace", "path": "/cloudwatchRoleArn", "value": role_arn}
+                ]
+            )
+            result.append(add_response("update_account", "Set cloudwatchRoleArn"))
+        except ClientError as e:
+            result.append(add_error("update_account", e.response["Error"]["Message"]))
+
+    return result
+
+
+def handle_api_gateway_stage(res_split, region, acct):
+    """Configure logging for API Gateway stage."""
+    result = []
+    LOG_LEVEL = "ERROR"
+    LOG_PREFIX = "/aws/vendedlogs/APIGW-Access_"
+    LOG_FORMAT = """{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength"}"""
+
+    try:
+        client = boto3.client("apigateway", region_name=region)
+        api_parts = res_split[5].split("/")
+        api_id = api_parts[2]
+        stage = api_parts[4]
+
+        # Setup account settings
+        result.extend(setupAPIGatewayAccountSettings(acct, client))
+
+        # Create log group
+        log_group_arn, create_results = createLogGroup(
+            f"{LOG_PREFIX}{api_id}/{stage}", region, acct
+        )
+        result.extend(create_results)
+
+        # Get stage info
+        try:
+            response = client.get_stage(restApiId=api_id, stageName=stage)
+        except ClientError as e:
+            return add_error("get_stage", e.response["Error"]["Message"])
+
+        # Check what needs updating
+        patches = []
+
+        # Access logging
+        if not response.get("accessLogSettings", {}).get("destinationArn", ""):
+            patches.extend(
+                [
+                    {
+                        "op": "replace",
+                        "path": "/accessLogSettings/destinationArn",
+                        "value": log_group_arn,
+                    },
+                    {
+                        "op": "replace",
+                        "path": "/accessLogSettings/format",
+                        "value": LOG_FORMAT,
+                    },
+                ]
+            )
+
+        # Tracing
+        if not response.get("tracingEnabled", False):
+            patches.append(
+                {"op": "replace", "path": "/tracingEnabled", "value": "true"}
+            )
+
+        # Method logging
+        if (
+            response.get("methodSettings", {}).get("*/*", {}).get("loggingLevel", "OFF")
+            == "OFF"
+        ):
+            patches.append(
+                {"op": "replace", "path": "/*/*/logging/loglevel", "value": LOG_LEVEL}
+            )
+
+        # Apply patches
+        if patches:
             try:
-                iamClient.attach_role_policy(
-                    RoleName=roleName,
-                    PolicyArn="arn:aws:iam::aws:policy/CloudWatchLogsFullAccess",
+                client.update_stage(
+                    restApiId=api_id, stageName=stage, patchOperations=patches
+                )
+                result.append(
+                    add_response("update_stage", f"API {api_id} Stage {stage} updated")
                 )
             except Exception as e:
-                print(e)
-                pass
-            print(f"[INFO] Role {roleName} updated for CloudWatchLogsFullAccess")
-            print(
-                "[INFO] Delay 10 seconds waiting for role consistency because no waiter available"
+                result.append(add_error("update_stage", str(e)))
+        else:
+            result.append(
+                add_response("patch", "No changes needed - already compliant")
             )
-            time.sleep(10)  # Sleep for 10 seconds
 
-            # update the state machine
-            response = sfnclient.update_state_machine(
-                stateMachineArn=ResourceId,
+    except Exception as e:
+        result.append(
+            add_error("enable_logging", f"Failed to configure API Gateway: {str(e)}")
+        )
+
+    return result[0] if result else add_error("unknown", "No result generated")
+
+
+def handle_step_functions(res_split, res_id, region, acct):
+    """Configure logging for Step Functions state machine."""
+    result = []
+
+    try:
+        sfn = boto3.client("stepfunctions", region_name=region)
+        sfn_name = res_split[6]
+
+        # Get state machine config
+        try:
+            response = sfn.describe_state_machine(stateMachineArn=res_id)
+            role_arn = response["roleArn"]
+            log_group_arn = ""
+
+            # Check existing logging
+            if "loggingConfiguration" in response:
+                cfg = response["loggingConfiguration"]
+                if "destinations" in cfg and cfg["destinations"]:
+                    dest = cfg["destinations"][0]
+                    if "cloudWatchLogsLogGroup" in dest:
+                        log_group = dest["cloudWatchLogsLogGroup"]
+                        log_group_arn = log_group.get("logGroupArn", "")
+        except ClientError as e:
+            return add_error("describe_machine", e.response["Error"]["Message"])
+
+        # Extract role name
+        role_name = role_arn.split("/")[1]
+
+        # Create log group if needed
+        if not log_group_arn:
+            log_group_arn, create_results = createLogGroup(
+                f"/aws/SFNLog/{sfn_name}", region, acct
+            )
+            log_group_arn = f"{log_group_arn}:*"
+            result.extend(create_results)
+
+        # Update role permissions
+        iam = boto3.client("iam")
+        try:
+            iam.attach_role_policy(
+                RoleName=role_name,
+                PolicyArn="arn:aws:iam::aws:policy/CloudWatchLogsFullAccess",
+            )
+        except ClientError:
+            pass  # Policy might already be attached
+
+        # Wait for IAM propagation
+        time.sleep(10)
+
+        # Update state machine logging
+        try:
+            sfn.update_state_machine(
+                stateMachineArn=res_id,
                 loggingConfiguration={
                     "level": "ERROR",
                     "includeExecutionData": False,
                     "destinations": [
-                        {"cloudWatchLogsLogGroup": {"logGroupArn": logGroupArn}},
+                        {"cloudWatchLogsLogGroup": {"logGroupArn": log_group_arn}},
                     ],
                 },
             )
-            responses["EnableLogging"].append(
-                {
-                    "Action": "update_state_machine",
-                    "Message": f"Step function {sfnName} modified for logging",
-                }
-            )
-        except Exception as error:
-            responses["EnableLogging"].append(
-                {
-                    "Action": "enable_logging",
-                    "Message": f"ERROR Unable to set logging on AwsStepFunctionsStateMachine - {error.response['Error']['Code']}",
-                }
-            )
-            pass
-
-    if ResourceType == "AwsApiGatewayV2Stage":
-        try:
-            apigwclientv2 = boto3.client("apigatewayv2", region_name=region)
-            apigwclientv1 = boto3.client("apigateway", region_name=region)
-            apigwArray = ResourceSplit[5].split("/")
-            ApiId = apigwArray[2]
-            stageName = apigwArray[4]
-
-            # Make sure API Gateway Account level settings have Cloudwatch Role
-            # uses v1 settings for account level
-            setupAPIGatewayAccountSettings(AwsAccountId, apigwclientv1)
-
-            # Get/Create Log Group for access and execution logging
-            # accesslogGroupArn = createLogGroup('API-Gateway-Access-Logs_'+ApiId+'/'+stageName, region, AwsAccountId)
-            accesslogGroupArn = createLogGroup(
-                "/aws/vendedlogs/APIGW-Access_" + ApiId + "/" + stageName,
-                region,
-                AwsAccountId,
-            )
-
-            # Get some info on the API
-            response = apigwclientv2.get_api(ApiId=ApiId)
-            ProtocolType = response["ProtocolType"]
-            if ProtocolType != "HTTP" and ProtocolType != "WEBSOCKET":
-                exit(f"Invalid Protocol type on API [{ProtocolType}]")
-
-            # Get the current Stage Info and figure out whats needed
-            response = apigwclientv2.get_stage(
-                ApiId=ApiId, StageName=stageName
-            )  # Params differ v1 to v2
-
-            # Access Logging required?
-            setAccessLogging = True
-            if "AccessLogSettings" in response:
-                if "DestinationArn" in response["AccessLogSettings"]:
-                    accessLogSettings = response["AccessLogSettings"]["DestinationArn"]
-                    if accessLogSettings != "":
-                        setAccessLogging = False
-
-            # Execute Logging Required?
-            try:
-                methodSettings = response["DefaultRouteSettings"]["LoggingLevel"]
-                if methodSettings == "OFF":
-                    setMethodLogging = True
-                else:
-                    setMethodLogging = False
-            except Exception:
-                setMethodLogging = True
-                pass
-
-            # XRay Tracing Required?
-            setXray = False
-
-            # Build up an array of items to patch
-            PatchOperations = {}
-            if setAccessLogging:
-                operation = {}
-                operation["DestinationArn"] = accesslogGroupArn
-                operation["Format"] = (
-                    '{ "requestId":"$context.requestId", "ip": "$context.identity.sourceIp", \
-                        "caller":"$context.identity.caller", "user":"$context.identity.user",\
-                        "requestTime":"$context.requestTime", "httpMethod":"$context.httpMethod",\
-                        "resourcePath":"$context.resourcePath", "status":"$context.status",\
-                        "protocol":"$context.protocol", "responseLength":"$context.responseLength" }'
+            result.append(
+                add_response(
+                    "update_machine", f"Step function {sfn_name} logging enabled"
                 )
-                PatchOperations["AccessLogSettings"] = operation
-
-            if setMethodLogging and ProtocolType == "WEBSOCKET":
-                operation = {}
-                operation["LoggingLevel"] = "ERROR"
-                PatchOperations["DefaultRouteSettings"] = operation
-
-            # If there are items to patch, then patch them!
-            if len(PatchOperations) > 0:
-                PatchOperations["ApiId"] = ApiId
-                PatchOperations["StageName"] = stageName
-
-                print(
-                    f"[INFO] The following Patch operations to the stage {stageName} will occur"
-                )
-                print(PatchOperations)
-
-                try:
-                    apigwclientv2.update_stage(**PatchOperations)
-                except Exception as error:
-                    responses["EnableLogging"].append(
-                        {
-                            "Action": "update_stage",
-                            "Message": f"ERROR API {ApiId} Stage {stageName} NOT patched - {error.response['Error']['Code']}",
-                        }
-                    )
-                    pass
-            else:
-                responses["EnableLogging"].append(
-                    {
-                        "Action": "patch",
-                        "Message": "ERROR No Patch operations required for APIGateway - Why was remediation requested?",
-                    }
-                )
-
-        except Exception as error:
-            responses["EnableLogging"].append(
-                {
-                    "Action": "update_stage",
-                    "Message": f"ERROR Unable to set logging on AwsApiGatewayV2Stage - {error.response['Error']['Code']}",
-                }
             )
-            pass
+        except ClientError as e:
+            result.append(add_error("update_machine", e.response["Error"]["Message"]))
 
-    if ResourceType == "AwsCloudFrontDistribution":
-        # DEBUG = False
+    except Exception as e:
+        result.append(add_error("enable_logging", str(e)))
 
-        distributionSplit = ResourceSplit[5].split("/")
-        distributionId = distributionSplit[1]
+    return result[0] if result else add_error("unknown", "No result generated")
 
-        # Get the current Distribution Config
-        # To update a web distribution using the CloudFront API
-        #   Use GetDistributionConfig to get the current configuration, including the version identifier ( ETag).
-        #   Update the distribution configuration that was returned in the response. Note the following important requirements and restrictions:
-        #   You must rename the ETag field to IfMatch, leaving the value unchanged. (Set the value of IfMatch to the value of ETag, then remove the ETag field.)
-        #   You can’t change the value of CallerReference.
-        #   Submit an UpdateDistribution request, providing the distribution configuration. The new configuration replaces the existing configuration. The values that
-        #   you specify in an UpdateDistribution request are not merged into your existing configuration. Make sure to include all fields: the ones that you modified
-        #   and also the ones that you didn’t.
 
-        # Permissions required:
-        # remediationPolicy2.addActions('cloudfront:GetDistribution*', 'cloudfront:UpdateDistribution');
+def handle_api_gateway_v2_stage(res_split, region, acct):
+    """Configure logging for API Gateway V2 stage."""
+    result = []
 
-        cloudfrontClient = boto3.client("cloudfront")
-        response = cloudfrontClient.get_distribution(Id=distributionId)
-        responses["EnableLogging"].append(
-            {
-                "Action": "get_distribution",
-                "Message": f"Distribution {distributionId} currently has a status of {response['Distribution']['Status']}",
-            }
+    try:
+        v2_client = boto3.client("apigatewayv2", region_name=region)
+        v1_client = boto3.client("apigateway", region_name=region)
+
+        # Parse API ID and stage
+        api_parts = res_split[5].split("/")
+        api_id = api_parts[2]
+        stage = api_parts[4]
+
+        # Setup account settings
+        result.extend(setupAPIGatewayAccountSettings(acct, v1_client))
+
+        # Create log group
+        log_group_arn, create_results = createLogGroup(
+            f"/aws/vendedlogs/APIGW-Access_{api_id}/{stage}", region, acct
         )
+        result.extend(create_results)
+
+        # Get API details
+        try:
+            api_response = v2_client.get_api(ApiId=api_id)
+            protocol = api_response["ProtocolType"]
+            if protocol not in ["HTTP", "WEBSOCKET"]:
+                return add_error(
+                    "validate_protocol", f"Invalid Protocol type: {protocol}"
+                )
+        except ClientError as e:
+            return add_error("get_api", e.response["Error"]["Message"])
+
+        # Get stage config
+        try:
+            stage_response = v2_client.get_stage(ApiId=api_id, StageName=stage)
+        except ClientError as e:
+            return add_error("get_stage", e.response["Error"]["Message"])
+
+        # Check what needs updating
+        updates = {"ApiId": api_id, "StageName": stage}
+
+        # Access logging
+        if not stage_response.get("AccessLogSettings", {}).get("DestinationArn"):
+            updates["AccessLogSettings"] = {
+                "DestinationArn": log_group_arn,
+                "Format": json.dumps(
+                    {
+                        "requestId": "$context.requestId",
+                        "ip": "$context.identity.sourceIp",
+                        "caller": "$context.identity.caller",
+                        "user": "$context.identity.user",
+                        "requestTime": "$context.requestTime",
+                        "httpMethod": "$context.httpMethod",
+                        "resourcePath": "$context.resourcePath",
+                        "status": "$context.status",
+                        "protocol": "$context.protocol",
+                        "responseLength": "$context.responseLength",
+                    }
+                ),
+            }
+
+        # WebSocket logging
+        if (
+            protocol == "WEBSOCKET"
+            and stage_response.get("DefaultRouteSettings", {}).get("LoggingLevel")
+            == "OFF"
+        ):
+            updates["DefaultRouteSettings"] = {"LoggingLevel": "ERROR"}
+
+        # Apply updates if needed
+        if len(updates) > 2:  # More than just ApiId and StageName
+            try:
+                v2_client.update_stage(**updates)
+                result.append(
+                    add_response("update_stage", f"API {api_id} Stage {stage} updated")
+                )
+            except ClientError as e:
+                result.append(add_error("update_stage", e.response["Error"]["Message"]))
+        else:
+            result.append(
+                add_response("patch", "No changes needed - already compliant")
+            )
+
+    except Exception as e:
+        result.append(add_error("update_stage", str(e)))
+
+    return result[0] if result else add_error("unknown", "No result generated")
+
+
+def handle_cloudfront_distribution(res_split, region, acct, logging_bucket):
+    """Configure CloudFront distribution for logging and security best practices."""
+    result = []
+
+    dist_parts = res_split[5].split("/")
+    dist_id = dist_parts[1]
+
+    # Get distribution config
+    cf = boto3.client("cloudfront")
+    try:
+        response = cf.get_distribution(Id=dist_id)
         if response["Distribution"]["Status"] != "Deployed":
-            responses["EnableLogging"].append(
-                {
-                    "Action": "get_distribution",
-                    "Message": f"cannot update cloudfront config when its status is {response['Distribution']['Status']}",
-                }
+            return add_error(
+                "get_distribution",
+                f"Cannot update when status is {response['Distribution']['Status']}",
             )
-            exit(
-                f"cannot update cloudfront config when its status is {response['Distribution']['Status']}"
+
+        etag = response["ETag"]
+        dist = response["Distribution"]
+        cfg = dist["DistributionConfig"]
+
+        # Track changes
+        changes_made = False
+
+        # Default root object
+        if not cfg.get("DefaultRootObject"):
+            cfg["DefaultRootObject"] = "index.html"
+            changes_made = True
+            result.append(
+                add_response(
+                    "set_default_root", "Updated DefaultRootObject to 'index.html'"
+                )
             )
-        else:
-            ETag = response["ETag"]  # Save the Etag
-            response.pop("ETag")  # Remove the Etag
 
-            parameters = {}
+        # Viewer protocol policy
+        if cfg["DefaultCacheBehavior"]["ViewerProtocolPolicy"] == "allow-all":
+            cfg["DefaultCacheBehavior"]["ViewerProtocolPolicy"] = "redirect-to-https"
+            changes_made = True
+            result.append(
+                add_response("update_protocol", "Updated to redirect-to-https")
+            )
 
-            distribution = response["Distribution"]
-            DistributionConfig = distribution["DistributionConfig"]
-
-            parameters["IfMatch"] = ETag  # Save the Etag as IfMatch
-
-            # Need to update the DefaultRootObject to index.html?
-            updateDefaultRoot = True
-
-            if "DefaultRootObject" in DistributionConfig:
-                if DistributionConfig["DefaultRootObject"] != "":
-                    updateDefaultRoot = False
-            else:
-                print(DistributionConfig)
-                exit("No DistributionConfig in response!!!")
-
-            if updateDefaultRoot:
-                DistributionConfig["DefaultRootObject"] = "index.html"
-                responses["EnableLogging"].append(
-                    {
-                        "Action": "set_default_root_object",
-                        "Message": "Updating DefaultRootObject from None to 'index.html'",
-                    }
-                )
-            else:
-                responses["EnableLogging"].append(
-                    {
-                        "Action": "set_default_root_object",
-                        "Message": f"DefaultRootObject remains as {DistributionConfig['DefaultRootObject']}",
-                    }
-                )
-
-            ViewerProtocolPolicy = DistributionConfig["DefaultCacheBehavior"][
-                "ViewerProtocolPolicy"
-            ]
-            if ViewerProtocolPolicy == "allow-all":
-                responses["EnableLogging"].append(
-                    {
-                        "Action": "update_viewer_protocol_policy",
-                        "Message": "Updating ViewerProtocolPolicy from 'allow-all' to 'redirect-to-https' for better 'security'",
-                    }
-                )
-                DistributionConfig["DefaultCacheBehavior"][
-                    "ViewerProtocolPolicy"
-                ] = "redirect-to-https"
-            else:
-                responses["EnableLogging"].append(
-                    {
-                        "Action": "update_viewer_protocol_policy",
-                        "Message": f"ViewerProtocolPolicy of '{ViewerProtocolPolicy}' meets security requirement for https",
-                    }
-                )
-
-            # Using SNI?
-            if DistributionConfig["Aliases"]["Quantity"] > 0:
-                ViewerCert = DistributionConfig["ViewerCertificate"]
-                SSLSupportMethod = ViewerCert["SSLSupportMethod"]
-                MinimumProtocolVersion = ViewerCert["MinimumProtocolVersion"]
-                DesiredProtocolVersion = "TLSv1.2_2021"
-                if SSLSupportMethod != "sni-only":
-                    responses["EnableLogging"].append(
-                        {
-                            "Action": "check_ssl_support_method",
-                            "Message": f"[ERROR] CLOUDFRONT CONFIGURED WITH A NON STANDARD EXPENSIVE OPTION  (SSLSupportMethod={SSLSupportMethod})",
-                        }
-                    )
-                if MinimumProtocolVersion != DesiredProtocolVersion:
-                    responses["EnableLogging"].append(
-                        {
-                            "Action": "check_minimum_protocol_version",
-                            "Message": f"Updating Cloudfront viewer certificate, minimum security protocol requirement from {MinimumProtocolVersion} to {DesiredProtocolVersion}",
-                        }
-                    )
-                    DistributionConfig["ViewerCertificate"][
-                        "MinimumProtocolVersion"
-                    ] = DesiredProtocolVersion
-            else:
-                responses["EnableLogging"].append(
-                    {
-                        "Action": "check_distro_aliases",
-                        "Message": "WARNING - You are not supposed to use the default domain name;  Please update to use a custom domain name (SNI)",
-                    }
-                )
-
-            # http version http/2 and http/3
-            if DistributionConfig["HttpVersion"] != "http2and3":
-                responses["EnableLogging"].append(
-                    {
-                        "Action": "check_http_version",
-                        "Message": "Updating DistributionConfig HttpVersion to http2and3",
-                    }
-                )
-                DistributionConfig["HttpVersion"] = "http2and3"
-
-            if DistributionConfig["Comment"] == "":
-                DistributionConfig["Comment"] = (
-                    "FIXME - You should really have a description for what this cloudfront does!"
-                )
-
-            if DistributionConfig["Logging"]["Enabled"] is False:
-                DistributionConfig["Logging"]["Enabled"] = True
-                DistributionConfig["Logging"]["IncludeCookies"] = True
-                DistributionConfig["Logging"]["Bucket"] = (
-                    event["LoggingBucket"] + ".s3.amazonaws.com"
-                )
-                DistributionConfig["Logging"]["Prefix"] = AwsAccountId + "/"
-                responses["EnableLogging"].append(
-                    {
-                        "Action": "set_logging",
-                        "Message": f"Set logging to bucket to {event['LoggingBucket']}",
-                    }
-                )
-
-            parameters["DistributionConfig"] = DistributionConfig
-
-            if "Id" not in parameters:
-                parameters["Id"] = distributionId
-
-            # Prettyprint the parameters
-            # print(json.dumps(parameters, indent=4))
-            # exit()
-
+        # TLS settings
+        if cfg.get("Aliases", {}).get("Quantity", 0) > 0:
             try:
-                response = cloudfrontClient.update_distribution(**parameters)
-                responses["EnableLogging"].append(
-                    {
-                        "Action": "update_distribution",
-                        "Message": f"Logging set on AwsCloudFrontDistribution {distributionId}",
-                    }
-                )
-            except Exception as error:
-                responses["EnableLogging"].append(
-                    {
-                        "Action": "update_distribution",
-                        "Message": f"ERROR Unable to set logging on AwsCloudFrontDistribution - {error.response['Error']['Code']}",
-                    }
-                )
+                cert = cfg["ViewerCertificate"]
+                if cert.get("MinimumProtocolVersion") != "TLSv1.2_2021":
+                    cert["MinimumProtocolVersion"] = "TLSv1.2_2021"
+                    changes_made = True
+                    result.append(add_response("update_tls", "Updated to TLSv1.2_2021"))
+            except KeyError:
                 pass
 
-    return {"output": "EnableLogging", "http_responses": responses}
+        # HTTP version
+        if cfg.get("HttpVersion", "http1.1") != "http2and3":
+            cfg["HttpVersion"] = "http2and3"
+            changes_made = True
+            result.append(add_response("update_http", "Updated to HTTP/2 and HTTP/3"))
 
+        # Add comment if missing
+        if not cfg.get("Comment"):
+            cfg["Comment"] = (
+                "FIXME - You should really have a description for what this cloudfront does!"
+            )
+            changes_made = True
+            result.append(add_response("add_comment", "Added default comment"))
 
-def setupAPIGatewayAccountSettings(AwsAccountId, apigwclient):
-    response = apigwclient.get_account()
-    if "cloudwatchRoleArn" not in response:
-        # Create a cloudwatch role and assign it to account
-        iamClient = boto3.client("iam")
-        roleName = "APIGatewayLogWriterRole"
-        try:
-            iamClient.create_role(
-                RoleName=roleName,
-                AssumeRolePolicyDocument='{"Version": "2012-10-17","Statement": [{"Sid": "","Effect": "Allow","Principal": {"Service": ["apigateway.amazonaws.com"]},"Action": ["sts:AssumeRole"]}]}',
-                Description="A role which allows API Gateway to write to CloudWatch Logs",
-            )
-            responses["EnableLogging"].append(
-                {
-                    "Action": "create_role",
-                    "Message": f"Role {roleName} created for API Gateway Cloudwatch Logs",
-                }
-            )
-
-        except ClientError as error:
-            # Put your error handling logic here
-            if error.response["Error"]["Code"] == "EntityAlreadyExists":
-                responses["EnableLogging"].append(
-                    {
-                        "Action": "create_role",
-                        "Message": f"Role {roleName} already exists for API Gateway Cloudwatch Logs",
-                    }
-                )
-            else:
-                responses["EnableLogging"].append(
-                    {
-                        "Action": "create_role",
-                        "Message": f"ERROR Role {roleName} {error.response['Error']['Code']}",
-                    }
-                )
-                pass
-
-        # Attach Permission to Role
-        try:
-            iamClient.attach_role_policy(
-                RoleName=roleName,
-                PolicyArn="arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs",
-            )
-            responses["EnableLogging"].append(
-                {
-                    "Action": "attach_role_policy",
-                    "Message": f"Role {roleName} now has policy AmazonAPIGatewayPushToCloudWatchLogs",
-                }
-            )
-        except Exception as error:
-            responses["EnableLogging"].append(
-                {
-                    "Action": "attach_role_policy",
-                    "Message": f"ERROR Role {roleName} policy AmazonAPIGatewayPushToCloudWatchLogs -{error.response['Error']['Code']}",
-                }
-            )
-            pass
-
-        try:
-            response = apigwclient.update_account(
-                patchOperations=[
-                    {
-                        "op": "replace",
-                        "path": "/cloudwatchRoleArn",
-                        "value": f"arn:aws:iam::{AwsAccountId}:role/APIGatewayLogWriterRole",
-                    },
-                ]
-            )
-            responses["EnableLogging"].append(
-                {
-                    "Action": "update_account",
-                    "Message": f"Set cloudwatchRoleArn to arn:aws:iam::{AwsAccountId}:role/APIGatewayLogWriterRole",
-                }
-            )
-        except Exception as error:
-            responses["EnableLogging"].append(
-                {
-                    "Action": "update_account",
-                    "Message": f"ERROR Set cloudwatchRoleArn to arn:aws:iam::{AwsAccountId}:role/APIGatewayLogWriterRole -{error.response['Error']['Code']}",
-                }
-            )
-            pass
-    else:
-        print(
-            "[INFO] Cloudwatch Role already exists for API Gateway Account Settings... skipping Role Creation"
-        )
-        responses["EnableLogging"].append(
-            {
-                "Action": "set_cloudwatch_rolet",
-                "Message": "Cloudwatch Role already exists for API Gateway Account Settings... skipping Role Creation",
+        # Enable logging
+        if not cfg.get("Logging", {}).get("Enabled", False):
+            cfg["Logging"] = {
+                "Enabled": True,
+                "IncludeCookies": True,
+                "Bucket": f"{logging_bucket}.s3.amazonaws.com",
+                "Prefix": f"{acct}/",
             }
-        )
-    return
-
-
-def createLogGroup(logGroupName, region, AwsAccountId):
-    logGroupName = logGroupName.replace("$default", "dollar_default")
-    try:
-        logsclient = boto3.client("logs", region_name=region)
-        response = logsclient.create_log_group(
-            logGroupName=logGroupName, tags={"CreatedBy": "ASR-Remediation"}
-        )
-        responses["EnableLogging"].append(
-            {
-                "Action": "create_log_group",
-                "Message": f"Create Log Group {logGroupName}",
-            }
-        )
-    except ClientError as error:
-        # Put your error handling logic here
-        # print(error.response['Error']['Code'])
-        if error.response["Error"]["Code"] == "ResourceAlreadyExistsException":
-            responses["EnableLogging"].append(
-                {
-                    "Action": "create_log_group",
-                    "Message": f"Log Group {logGroupName} already exists... proceeding",
-                }
+            changes_made = True
+            result.append(
+                add_response("enable_logging", f"Enabled logging to {logging_bucket}")
             )
+
+        # Apply changes if needed
+        if changes_made:
+            try:
+                cf.update_distribution(Id=dist_id, IfMatch=etag, DistributionConfig=cfg)
+                result.append(
+                    add_response(
+                        "update_distribution", f"Distribution {dist_id} updated"
+                    )
+                )
+            except ClientError as e:
+                return add_error(
+                    "update_distribution",
+                    f"{e.response['Error']['Code']}: {e.response['Error']['Message']}",
+                )
         else:
-            responses["EnableLogging"].append(
-                {
-                    "Action": "create_log_group",
-                    "Message": f"ERROR Log Group {logGroupName} - {error.response['Error']['Code']}",
-                }
+            result.append(
+                add_response(
+                    "check_distribution", "No changes needed - already compliant"
+                )
             )
-        pass
 
-    # Get log Group Info
-    response = logsclient.describe_log_groups(
-        logGroupNamePrefix=logGroupName,
-    )
+    except ClientError as e:
+        return add_error(
+            "cloudfront_operation",
+            f"{e.response['Error']['Code']}: {e.response['Error']['Message']}",
+        )
+    except Exception as e:
+        return add_error("cloudfront_operation", str(e))
+
+    return result[0] if result else add_error("unknown", "No result generated")
+
+
+def handle_s3_bucket(bucket_name, region, acct, logging_bucket):
+    # bucket_name is the resource name
+    s3_client = boto3.client("s3")
+    target_prefix = f"{bucket_name}/"
+
     try:
-        retention = response["logGroups"][0]["retentionInDays"]
-    except Exception:
-        retention = -1
+        # Check if source bucket exists
+        s3_client.head_bucket(Bucket=bucket_name)
 
-    if retention < 0:
-        try:
-            logsclient.put_retention_policy(
-                logGroupName=logGroupName, retentionInDays=365
-            )
-            responses["EnableLogging"].append(
-                {
-                    "Action": "put_retention_policy",
-                    "Message": f"Log Group {logGroupName} now has a 1 year retention period",
+        # Check for circular logging scenarios
+        if bucket_name == logging_bucket or "s3-access-logs" in bucket_name:
+            return {
+                "output": {
+                    "message": "This bucket is exempt from logging as it would create a circular log effect",
+                    "resourceBucketName": bucket_name,
+                    "LoggingBucketName": logging_bucket,
+                    "LoggingPrefix": target_prefix,
+                    "status": "SUPPRESSED",
                 }
-            )
-        except Exception as error:
-            responses["EnableLogging"].append(
-                {
-                    "Action": "put_retention_policy",
-                    "Message": f"ERROR Log Group {logGroupName} unable to set retention period - {error.response['Error']['Code']}",
+            }
+
+        # Enable access logging
+        s3_client.put_bucket_logging(
+            Bucket=bucket_name,
+            BucketLoggingStatus={
+                "LoggingEnabled": {
+                    "TargetBucket": logging_bucket,
+                    "TargetPrefix": target_prefix,
+                    "TargetObjectKeyFormat": {
+                        "PartitionedPrefix": {"PartitionDateSource": "EventTime"}
+                    },
                 }
-            )
-            pass
+            },
+        )
 
-    return f"arn:aws:logs:{region}:{AwsAccountId}:log-group:{logGroupName}"
+        return {
+            "output": {
+                "message": "Server Access Logging Successfully Set.",
+                "resourceBucketName": bucket_name,
+                "LoggingBucketName": logging_bucket,
+                "LoggingPrefix": target_prefix,
+                "status": "RESOLVED",
+            }
+        }
+    except s3_client.exceptions.NoSuchBucket:
+        return {
+            "output": {
+                "message": "One of the buckets doesnt exist",
+                "resourceBucketName": bucket_name,
+                "LoggingBucketName": logging_bucket,
+                "LoggingPrefix": target_prefix,
+                "status": "FAILED",
+            }
+        }
+    except Exception as e:
+        return {
+            "output": {
+                "message": str(e),
+                "resourceBucketName": bucket_name,
+                "LoggingBucketName": logging_bucket,
+                "LoggingPrefix": target_prefix,
+                "status": "FAILED",
+            }
+        }
 
 
+# For local testing
 if __name__ == "__main__":
-    event = {
-        "AccountId": "211125410042",
-        "ResourceId": "arn:aws:cloudfront::211125410042:distribution/E1ZVJNXBU1SKT5",
+    # Example event for testing
+    test_event = {
+        "ResourceId": "asr-test-bucket-kpp-2",
         "Region": "us-east-1",
-        "ResourceType": "AwsCloudFrontDistribution",
-        "LoggingBucket": "asr-logging-cloudfront-211125410042-us-east-1",
+        "AccountId": "211125410042",
+        "ResourceType": "AwsS3Bucket",
+        "LoggingBucket": "cnxc-s3-server-access-logging-211125410042-us-east-1",
     }
-    result = runbook_handler(event, "")
-    print(result)
+    print(runbook_handler((test_event), None))

@@ -19,7 +19,7 @@ export class ConfigureS3BucketLoggingDocument extends ControlRunbookDocument {
       securityControlId: 'S3.9',
       remediationName: 'CNXC_ConfigureS3ServerAccessLogging',
       scope: RemediationScope.GLOBAL,
-      resourceIdName: 'BucketName',
+      resourceIdName: 'ResourceId',
       resourceIdRegex: String.raw`^arn:(?:aws|aws-cn|aws-us-gov):s3:::([A-Za-z0-9.-]{3,63})$`,
       updateDescription: HardCodedString.of('Added Server Access Logging to S3 bucket.'),
     });
@@ -30,35 +30,21 @@ export class ConfigureS3BucketLoggingDocument extends ControlRunbookDocument {
     const outputs = super.getParseInputStepOutputs();
 
     outputs.push({
-      name: 'Region',
+      name: 'ResourceType',
       outputType: DataTypeEnum.STRING,
-      selector: '$.Payload.resource.Region',
-    });
-
-    outputs.push({
-      name: 'AccountId',
-      outputType: DataTypeEnum.STRING,
-      selector: '$.Payload.account_id',
+      selector: '$.Payload.object.Type',
     });
 
     return outputs;
   }
 
-  // /** @override */
-  // protected getRemediationStep(): AutomationStep {
-  //   return new ExecuteAutomationStep(this, 'Remediation', {
-  //     documentName: HardCodedString.of(`AWS-${this.remediationName}`),
-  //     runtimeParameters: HardCodedStringMap.of(this.getRemediationParams()),
-  //   });
-  // }
-
   /** @override */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   protected getRemediationParams(): { [_: string]: any } {
     const params = super.getRemediationParams();
-    params.Region = StringVariable.of('ParseInput.Region');
-    params.AccountId = StringVariable.of('ParseInput.AccountId');
-    params.BucketName = StringVariable.of('ParseInput.BucketName');
+    params.Region = StringVariable.of('global:REGION');
+    params.AccountId = StringVariable.of('global:ACCOUNT_ID');
+    params.ResourceType = StringVariable.of('ParseInput.ResourceType');
     return params;
   }
 }

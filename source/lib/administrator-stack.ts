@@ -2,50 +2,56 @@
 // SPDX-License-Identifier: Apache-2.0
 import * as cdk_nag from 'cdk-nag';
 import * as cdk from 'aws-cdk-lib';
+import { App, CfnOutput, Fn, Stack } from 'aws-cdk-lib';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import { Tracing } from 'aws-cdk-lib/aws-lambda';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
-import { StringParameter, CfnParameter } from 'aws-cdk-lib/aws-ssm';
+import { CfnParameter, StringParameter } from 'aws-cdk-lib/aws-ssm';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
 import {
-  Role,
+  AccountRootPrincipal,
+  CfnPolicy,
   CfnRole,
   Policy,
-  CfnPolicy,
-  PolicyStatement,
   PolicyDocument,
+  PolicyStatement,
+  Role,
   ServicePrincipal,
-  AccountRootPrincipal,
 } from 'aws-cdk-lib/aws-iam';
 import { OrchestratorConstruct } from './common-orchestrator-construct';
 import { CfnStateMachine, StateMachine } from 'aws-cdk-lib/aws-stepfunctions';
 import { OneTrigger } from './ssmplaybook';
 import { CloudWatchMetrics } from './cloudwatch_metrics';
 import { AdminPlaybook } from './admin-playbook';
-import { standardPlaybookProps, scPlaybookProps } from '../playbooks/playbook-index';
+import { scPlaybookProps, standardPlaybookProps } from '../playbooks/playbook-index';
+import { ActionLog } from './action-log';
+import { addCfnGuardSuppression } from './cdk-helper/add-cfn-nag-suppression';
 
-export interface SHARRStackProps extends cdk.StackProps {
+export interface ASRStackProps extends cdk.StackProps {
   solutionId: string;
   solutionVersion: string;
   solutionDistBucket: string;
   solutionTMN: string;
   solutionName: string;
   runtimePython: lambda.Runtime;
-  orchLogGroup: string;
+  orchestratorLogGroup: string;
+  SNSTopicName: string;
+  cloudTrailLogGroupName: string;
 }
 
-export class SolutionDeployStack extends cdk.Stack {
+export class AdministratorStack extends cdk.Stack {
   SEND_ANONYMIZED_DATA = 'Yes';
-  nestedStacksWithAppRegistry: cdk.Stack[];
+  private readonly primarySolutionSNSTopicARN: string;
+  readonly nestedStacksWithAppRegistry: Stack[] = [];
 
-  constructor(scope: cdk.App, id: string, props: SHARRStackProps) {
+  constructor(scope: App, id: string, props: ASRStackProps) {
     super(scope, id, props);
-    this.nestedStacksWithAppRegistry = [];
     const stack = cdk.Stack.of(this);
-    const RESOURCE_PREFIX = props.solutionId.replace(/^DEV-/, ''); // prefix on every resource name
+    const RESOURCE_NAME_PREFIX = props.solutionId.replace(/^DEV-/, ''); // prefix on every resource name
 
     //-------------------------------------------------------------------------
     // Solutions Bucket - Source Code
@@ -97,30 +103,31 @@ export class SolutionDeployStack extends cdk.Stack {
 
     const kmsKey = new kms.Key(this, 'SHARR-key', {
       enableKeyRotation: true,
-      alias: `${RESOURCE_PREFIX}-SHARR-Key`,
+      alias: `${RESOURCE_NAME_PREFIX}-SHARR-Key`,
       policy: kmsKeyPolicy,
     });
 
     const kmsKeyParm = new StringParameter(this, 'SHARR_Key', {
       description: 'KMS Customer Managed Key that SHARR will use to encrypt data',
-      parameterName: `/Solutions/${RESOURCE_PREFIX}/CMK_ARN`,
+      parameterName: `/Solutions/${RESOURCE_NAME_PREFIX}/CMK_ARN`,
       stringValue: kmsKey.keyArn,
     });
 
     //-------------------------------------------------------------------------
     // SNS Topic for notification fanout on Playbook completion
     //
-    const snsTopic = new sns.Topic(this, 'SHARR-Topic', {
-      displayName: 'SHARR Playbook Topic (' + RESOURCE_PREFIX + ')',
-      topicName: RESOURCE_PREFIX + '-SHARR_Topic',
+    const primarySolutionTopic = new sns.Topic(this, 'SHARR-Topic', {
+      displayName: 'SHARR Playbook Topic (' + RESOURCE_NAME_PREFIX + ')',
+      topicName: props.SNSTopicName,
       masterKey: kmsKey,
     });
+    this.primarySolutionSNSTopicARN = `arn:${stack.partition}:sns:${stack.region}:${stack.account}:${props.SNSTopicName}`;
 
     new StringParameter(this, 'SHARR_SNS_Topic', {
       description:
         'SNS Topic ARN where SHARR will send status messages. This topic can be useful for driving additional actions, such as email notifications, trouble ticket updates.',
-      parameterName: '/Solutions/' + RESOURCE_PREFIX + '/SNS_Topic_ARN',
-      stringValue: snsTopic.topicArn,
+      parameterName: '/Solutions/' + RESOURCE_NAME_PREFIX + '/SNS_Topic_ARN',
+      stringValue: primarySolutionTopic.topicArn,
     });
 
     const mapping = new cdk.CfnMapping(this, 'mappings');
@@ -128,23 +135,19 @@ export class SolutionDeployStack extends cdk.Stack {
 
     new StringParameter(this, 'SHARR_SendAnonymousMetrics', {
       description: 'Flag to enable or disable sending anonymous metrics.',
-      parameterName: '/Solutions/' + RESOURCE_PREFIX + '/sendAnonymizedMetrics',
+      parameterName: '/Solutions/' + RESOURCE_NAME_PREFIX + '/sendAnonymizedMetrics',
       stringValue: mapping.findInMap('sendAnonymizedMetrics', 'data'),
     });
 
     new StringParameter(this, 'SHARR_version', {
       description: 'Solution version for metrics.',
-      parameterName: '/Solutions/' + RESOURCE_PREFIX + '/version',
+      parameterName: '/Solutions/' + RESOURCE_NAME_PREFIX + '/version',
       stringValue: props.solutionVersion,
     });
 
-    /**
-     * @description Lambda Layer for common solution functions
-     * @type {lambda.LayerVersion}
-     */
-    const sharrLambdaLayer = new lambda.LayerVersion(this, 'SharrLambdaLayer', {
+    const asrLambdaLayer = new lambda.LayerVersion(this, 'ASRLambdaLayer', {
       compatibleRuntimes: [props.runtimePython],
-      description: 'SO0111 SHARR Common functions used by the solution',
+      description: 'SO0111 ASR Common functions used by the solution',
       license: 'https://www.apache.org/licenses/LICENSE-2.0',
       code: lambda.Code.fromBucket(
         SolutionsBucket,
@@ -157,10 +160,10 @@ export class SolutionDeployStack extends cdk.Stack {
      * @type {Policy}
      */
     const orchestratorPolicy = new Policy(this, 'orchestratorPolicy', {
-      policyName: RESOURCE_PREFIX + '-SHARR_Orchestrator',
+      policyName: RESOURCE_NAME_PREFIX + '-SHARR_Orchestrator',
       statements: [
         new PolicyStatement({
-          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
+          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
           resources: ['*'],
         }),
         new PolicyStatement({
@@ -170,8 +173,8 @@ export class SolutionDeployStack extends cdk.Stack {
         new PolicyStatement({
           actions: ['sts:AssumeRole'],
           resources: [
-            `arn:${this.partition}:iam::*:role/${RESOURCE_PREFIX}-SHARR-Orchestrator-Member`,
-            //'arn:' + this.partition + ':iam::*:role/' + RESOURCE_PREFIX +
+            `arn:${this.partition}:iam::*:role/${RESOURCE_NAME_PREFIX}-SHARR-Orchestrator-Member`,
+            //'arn:' + this.partition + ':iam::*:role/' + RESOURCE_NAME_PREFIX +
             //'-Remediate-*',
           ],
         }),
@@ -211,8 +214,8 @@ export class SolutionDeployStack extends cdk.Stack {
 
     const orchestratorRole = new Role(this, 'orchestratorRole', {
       assumedBy: new ServicePrincipal('lambda.amazonaws.com'),
-      description: 'Lambda role to allow cross account read-only SHARR orchestrator functions',
-      roleName: `${RESOURCE_PREFIX}-SHARR-Orchestrator-Admin`,
+      description: 'Lambda role to allow cross account read-only ASR orchestrator functions',
+      roleName: `${RESOURCE_NAME_PREFIX}-SHARR-Orchestrator-Admin`,
     });
 
     orchestratorRole.attachInlinePolicy(orchestratorPolicy);
@@ -231,13 +234,10 @@ export class SolutionDeployStack extends cdk.Stack {
         },
       };
     }
+    addCfnGuardSuppression(orchestratorRole, 'IAM_NO_INLINE_POLICY_CHECK');
 
-    /**
-     * @description checkSSMDocState - get the status of an ssm document
-     * @type {lambda.Function}
-     */
-    const checkSSMDocState = new lambda.Function(this, 'checkSSMDocState', {
-      functionName: RESOURCE_PREFIX + '-SHARR-checkSSMDocState',
+    const checkSSMDocumentState = new lambda.Function(this, 'checkSSMDocumentState', {
+      functionName: RESOURCE_NAME_PREFIX + '-ASR-checkSSMDocumentState',
       handler: 'check_ssm_doc_state.lambda_handler',
       runtime: props.runtimePython,
       description: 'Checks the status of an SSM Automation Document in the target account',
@@ -250,15 +250,17 @@ export class SolutionDeployStack extends cdk.Stack {
         AWS_PARTITION: this.partition,
         SOLUTION_ID: props.solutionId,
         SOLUTION_VERSION: props.solutionVersion,
+        SOLUTION_TMN: props.solutionTMN,
       },
       memorySize: 256,
       timeout: cdk.Duration.seconds(600),
       role: orchestratorRole,
-      layers: [sharrLambdaLayer],
+      tracing: Tracing.ACTIVE,
+      layers: [asrLambdaLayer],
     });
 
     {
-      const childToMod = checkSSMDocState.node.findChild('Resource') as lambda.CfnFunction;
+      const childToMod = checkSSMDocumentState.node.findChild('Resource') as lambda.CfnFunction;
 
       childToMod.cfnOptions.metadata = {
         cfn_nag: {
@@ -285,7 +287,7 @@ export class SolutionDeployStack extends cdk.Stack {
      * @type {lambda.Function}
      */
     const getApprovalRequirement = new lambda.Function(this, 'getApprovalRequirement', {
-      functionName: RESOURCE_PREFIX + '-SHARR-getApprovalRequirement',
+      functionName: RESOURCE_NAME_PREFIX + '-SHARR-getApprovalRequirement',
       handler: 'get_approval_requirement.lambda_handler',
       runtime: props.runtimePython,
       description: 'Determines if a manual approval is required for remediation',
@@ -299,11 +301,13 @@ export class SolutionDeployStack extends cdk.Stack {
         SOLUTION_ID: props.solutionId,
         SOLUTION_VERSION: props.solutionVersion,
         WORKFLOW_RUNBOOK: '',
+        SOLUTION_TMN: props.solutionTMN,
       },
       memorySize: 256,
       timeout: cdk.Duration.seconds(600),
       role: orchestratorRole,
-      layers: [sharrLambdaLayer],
+      tracing: Tracing.ACTIVE,
+      layers: [asrLambdaLayer],
     });
 
     {
@@ -334,7 +338,7 @@ export class SolutionDeployStack extends cdk.Stack {
      * @type {lambda.Function}
      */
     const execAutomation = new lambda.Function(this, 'execAutomation', {
-      functionName: RESOURCE_PREFIX + '-SHARR-execAutomation',
+      functionName: RESOURCE_NAME_PREFIX + '-SHARR-execAutomation',
       handler: 'exec_ssm_doc.lambda_handler',
       runtime: props.runtimePython,
       description: 'Executes an SSM Automation Document in a target account',
@@ -347,11 +351,13 @@ export class SolutionDeployStack extends cdk.Stack {
         AWS_PARTITION: this.partition,
         SOLUTION_ID: props.solutionId,
         SOLUTION_VERSION: props.solutionVersion,
+        SOLUTION_TMN: props.solutionTMN,
       },
       memorySize: 256,
       timeout: cdk.Duration.seconds(600),
       role: orchestratorRole,
-      layers: [sharrLambdaLayer],
+      tracing: Tracing.ACTIVE,
+      layers: [asrLambdaLayer],
     });
 
     {
@@ -382,7 +388,7 @@ export class SolutionDeployStack extends cdk.Stack {
      * @type {lambda.Function}
      */
     const monitorSSMExecState = new lambda.Function(this, 'monitorSSMExecState', {
-      functionName: RESOURCE_PREFIX + '-SHARR-monitorSSMExecState',
+      functionName: RESOURCE_NAME_PREFIX + '-SHARR-monitorSSMExecState',
       handler: 'check_ssm_execution.lambda_handler',
       runtime: props.runtimePython,
       description: 'Checks the status of an SSM automation document execution',
@@ -395,11 +401,13 @@ export class SolutionDeployStack extends cdk.Stack {
         AWS_PARTITION: this.partition,
         SOLUTION_ID: props.solutionId,
         SOLUTION_VERSION: props.solutionVersion,
+        SOLUTION_TMN: props.solutionTMN,
       },
       memorySize: 256,
       timeout: cdk.Duration.seconds(600),
       role: orchestratorRole,
-      layers: [sharrLambdaLayer],
+      tracing: Tracing.ACTIVE,
+      layers: [asrLambdaLayer],
     });
 
     {
@@ -430,10 +438,10 @@ export class SolutionDeployStack extends cdk.Stack {
      * @type {Policy}
      */
     const notifyPolicy = new Policy(this, 'notifyPolicy', {
-      policyName: RESOURCE_PREFIX + '-SHARR_Orchestrator_Notifier',
+      policyName: RESOURCE_NAME_PREFIX + '-SHARR_Orchestrator_Notifier',
       statements: [
         new PolicyStatement({
-          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
+          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
           resources: ['*'],
         }),
         new PolicyStatement({
@@ -450,10 +458,14 @@ export class SolutionDeployStack extends cdk.Stack {
         }),
         new PolicyStatement({
           actions: ['sns:Publish'],
-          resources: [`arn:${this.partition}:sns:${this.region}:${this.account}:${RESOURCE_PREFIX}-SHARR_Topic`],
+          resources: [`arn:${this.partition}:sns:${this.region}:${this.account}:${RESOURCE_NAME_PREFIX}-SHARR_Topic`],
         }),
         new PolicyStatement({
           actions: ['cloudwatch:PutMetricData'],
+          resources: ['*'],
+        }),
+        new PolicyStatement({
+          actions: ['organizations:ListAccounts'],
           resources: ['*'],
         }),
       ],
@@ -515,12 +527,24 @@ export class SolutionDeployStack extends cdk.Stack {
       };
     }
 
+    // Defined outside cloudwatch_metrics.ts to avoid dependency loop between cloudWatchMetrics and orchStateMachine
+    const enableEnhancedCloudWatchMetrics = new cdk.CfnParameter(this, 'EnableEnhancedCloudWatchMetrics', {
+      type: 'String',
+      description: `Enable collection of metrics per Control ID in addition to standard metrics. You must also select 'yes' for UseCloudWatchMetrics to enable enhanced metric collection. The added cost of these additional custom metrics could be up to $67.20/month.`,
+      default: 'no',
+      allowedValues: ['yes', 'no'],
+    });
+
+    const enhancedMetricsEnabled = new cdk.CfnCondition(this, 'enhancedMetricsEnabled', {
+      expression: Fn.conditionEquals(enableEnhancedCloudWatchMetrics.valueAsString, 'yes'),
+    });
+
     /**
      * @description sendNotifications - send notifications and log messages from Orchestrator step function
      * @type {lambda.Function}
      */
     const sendNotifications = new lambda.Function(this, 'sendNotifications', {
-      functionName: RESOURCE_PREFIX + '-SHARR-sendNotifications',
+      functionName: RESOURCE_NAME_PREFIX + '-SHARR-sendNotifications',
       handler: 'send_notifications.lambda_handler',
       runtime: props.runtimePython,
       description: 'Sends notifications and log messages',
@@ -533,11 +557,14 @@ export class SolutionDeployStack extends cdk.Stack {
         AWS_PARTITION: this.partition,
         SOLUTION_ID: props.solutionId,
         SOLUTION_VERSION: props.solutionVersion,
+        SOLUTION_TMN: props.solutionTMN,
+        ENHANCED_METRICS: enableEnhancedCloudWatchMetrics.valueAsString,
       },
       memorySize: 256,
       timeout: cdk.Duration.seconds(600),
       role: notifyRole,
-      layers: [sharrLambdaLayer],
+      tracing: Tracing.ACTIVE,
+      layers: [asrLambdaLayer],
     });
 
     {
@@ -567,18 +594,22 @@ export class SolutionDeployStack extends cdk.Stack {
     // Custom Lambda Policy
     //
     const createCustomActionPolicy = new Policy(this, 'createCustomActionPolicy', {
-      policyName: RESOURCE_PREFIX + '-SHARR_Custom_Action',
+      policyName: RESOURCE_NAME_PREFIX + '-SHARR_Custom_Action',
       statements: [
         new PolicyStatement({
           actions: ['cloudwatch:PutMetricData'],
           resources: ['*'],
         }),
         new PolicyStatement({
-          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
+          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
           resources: ['*'],
         }),
         new PolicyStatement({
-          actions: ['securityhub:CreateActionTarget', 'securityhub:DeleteActionTarget'],
+          actions: [
+            'securityhub:CreateActionTarget',
+            'securityhub:DescribeActionTargets',
+            'securityhub:DeleteActionTarget',
+          ],
           resources: ['*'],
         }),
         new PolicyStatement({
@@ -635,10 +666,10 @@ export class SolutionDeployStack extends cdk.Stack {
     // Custom Lambda - Create Custom Action
     //
     const createCustomAction = new lambda.Function(this, 'CreateCustomAction', {
-      functionName: RESOURCE_PREFIX + '-SHARR-CustomAction',
+      functionName: RESOURCE_NAME_PREFIX + '-SHARR-CustomAction',
       handler: 'action_target_provider.lambda_handler',
       runtime: props.runtimePython,
-      description: 'Custom resource to create an action target in Security Hub',
+      description: 'Custom resource to create or retrieve an action target in Security Hub',
       code: lambda.Code.fromBucket(
         SolutionsBucket,
         props.solutionTMN + '/' + props.solutionVersion + '/lambda/action_target_provider.zip',
@@ -653,7 +684,7 @@ export class SolutionDeployStack extends cdk.Stack {
       memorySize: 256,
       timeout: cdk.Duration.seconds(600),
       role: createCustomActionRole,
-      layers: [sharrLambdaLayer],
+      layers: [asrLambdaLayer],
     });
 
     const createCAFuncResource = createCustomAction.node.findChild('Resource') as lambda.CfnFunction;
@@ -704,15 +735,15 @@ export class SolutionDeployStack extends cdk.Stack {
 
     const orchestrator = new OrchestratorConstruct(this, 'orchestrator', {
       roleArn: orchestratorRole.roleArn,
-      ssmDocStateLambda: checkSSMDocState.functionArn,
+      ssmDocStateLambda: checkSSMDocumentState.functionArn,
       ssmExecDocLambda: execAutomation.functionArn,
       ssmExecMonitorLambda: monitorSSMExecState.functionArn,
       notifyLambda: sendNotifications.functionArn,
       getApprovalRequirementLambda: getApprovalRequirement.functionArn,
-      solutionId: RESOURCE_PREFIX,
+      solutionId: RESOURCE_NAME_PREFIX,
       solutionName: props.solutionName,
       solutionVersion: props.solutionVersion,
-      orchLogGroup: props.orchLogGroup,
+      orchLogGroup: props.orchestratorLogGroup,
       kmsKeyParm: kmsKeyParm,
       sqsQueue: schedulingQueue,
     });
@@ -724,12 +755,43 @@ export class SolutionDeployStack extends cdk.Stack {
     const orchArnParm = orchestrator.node.findChild('SHARR_Orchestrator_Arn') as StringParameter;
     const orchestratorArn = orchArnParm.node.defaultChild as CfnParameter;
 
+    // Role used by custom action EventBridge rules
+    const customActionEventsRuleRole = new Role(this, 'EventsRuleRole', {
+      assumedBy: new ServicePrincipal('events.amazonaws.com'),
+    });
+
     //---------------------------------------------------------------------
     // OneTrigger - Remediate with ASR custom action
     //
+    // Create an IAM role for Events to start the State Machine
+
     new OneTrigger(this, 'RemediateWithSharr', {
       targetArn: orchStateMachine.stateMachineArn,
       serviceToken: createCustomAction.functionArn,
+      ruleId: 'Remediate Custom Action',
+      ruleName: 'Remediate_with_ASR_CustomAction',
+      eventsRole: customActionEventsRuleRole,
+      customActionName: 'Remediate with ASR', // must be <= 20 chars in length
+      customActionId: 'ASRRemediation', // must be <= 20 chars in length
+      customActionDescription: 'Submit the finding to Automated Response and Remediation (ASR) for remediation.',
+      prereq: [createCAFuncResource, createCAPolicyResource],
+    });
+
+    //---------------------------------------------------------------------
+    // OneTrigger - Remediate & Generate Ticket custom action
+    //
+    new OneTrigger(this, 'RemediateAndTicket', {
+      targetArn: orchStateMachine.stateMachineArn,
+      serviceToken: createCustomAction.functionArn,
+      condition: orchestrator.ticketingEnabled,
+      ruleId: 'Ticketing Custom Action',
+      description: 'Remediate with ASR and generate a ticket.',
+      ruleName: 'ASR_Remediate_and_Ticket_CustomAction',
+      eventsRole: customActionEventsRuleRole,
+      customActionName: 'ASR:Remediate&Ticket', // must be <= 20 chars in length
+      customActionId: 'ASRTicketing', // must be <= 20 chars in length
+      customActionDescription:
+        'Submit the finding to Automated Response and Remediation (ASR) for remediation and generate a ticket.',
       prereq: [createCAFuncResource, createCAPolicyResource],
     });
 
@@ -745,7 +807,6 @@ export class SolutionDeployStack extends cdk.Stack {
         description: playbookProps.description,
       });
       securityStandardPlaybookNames.push(playbook.parameterName);
-
       if (playbookProps.useAppRegistry) {
         this.nestedStacksWithAppRegistry.push(playbook.playbookStack);
       }
@@ -766,13 +827,25 @@ export class SolutionDeployStack extends cdk.Stack {
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
       pointInTimeRecovery: true,
       timeToLiveAttribute: 'TTL',
+      deletionProtection: true,
+    });
+    const readScaling = schedulingTable.autoScaleReadCapacity({ minCapacity: 1, maxCapacity: 10 });
+    readScaling.scaleOnUtilization({
+      targetUtilizationPercent: 70,
+    });
+    const writeScaling = schedulingTable.autoScaleWriteCapacity({ minCapacity: 1, maxCapacity: 10 });
+    writeScaling.scaleOnUtilization({
+      targetUtilizationPercent: 70,
     });
 
+    addCfnGuardSuppression(schedulingTable, 'DYNAMODB_BILLING_MODE_RULE');
+    addCfnGuardSuppression(schedulingTable, 'DYNAMODB_TABLE_ENCRYPTED_KMS');
+
     const schedulingLamdbdaPolicy = new Policy(this, 'SchedulingLambdaPolicy', {
-      policyName: RESOURCE_PREFIX + '-SHARR_Scheduling_Lambda',
+      policyName: RESOURCE_NAME_PREFIX + '-SHARR_Scheduling_Lambda',
       statements: [
         new PolicyStatement({
-          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
+          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
           resources: ['*'],
         }),
         new PolicyStatement({
@@ -804,7 +877,7 @@ export class SolutionDeployStack extends cdk.Stack {
      * @type {lambda.Function}
      */
     const schedulingLambdaTrigger = new lambda.Function(this, 'schedulingLambdaTrigger', {
-      functionName: RESOURCE_PREFIX + '-SHARR-schedulingLambdaTrigger',
+      functionName: RESOURCE_NAME_PREFIX + '-SHARR-schedulingLambdaTrigger',
       handler: 'schedule_remediation.lambda_handler',
       runtime: props.runtimePython,
       description: 'SO0111 ASR function that schedules remediations in member accounts',
@@ -820,25 +893,34 @@ export class SolutionDeployStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(10),
       role: schedulingLambdaRole,
       reservedConcurrentExecutions: 1,
-      layers: [sharrLambdaLayer],
+      tracing: Tracing.ACTIVE,
+      layers: [asrLambdaLayer],
     });
     orchStateMachine.grantTaskResponse(schedulingLambdaTrigger);
     schedulingTable.grantReadWriteData(schedulingLambdaTrigger);
 
+    addCfnGuardSuppression(schedulingLambdaTrigger, 'LAMBDA_INSIDE_VPC');
+
     schedulingLambdaTrigger.addEventSource(eventSource);
+
+    new ActionLog(this, 'ActionLog', {
+      logGroupName: props.cloudTrailLogGroupName,
+    });
 
     const cloudWatchMetrics = new CloudWatchMetrics(this, {
       solutionId: props.solutionId,
       schedulingQueueName: schedulingQueue.queueName,
       orchStateMachineArn: orchStateMachine.stateMachineArn,
       kmsKey: kmsKey,
+      actionLogLogGroupName: props.cloudTrailLogGroupName,
+      enhancedMetricsEnabled: enhancedMetricsEnabled,
     });
 
     const customResourceLambdaPolicyDocument = new PolicyDocument({
       statements: [
         new PolicyStatement({ actions: ['cloudwatch:PutMetricData'], resources: ['*'] }),
         new PolicyStatement({
-          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
+          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
           resources: ['*'],
         }),
         new PolicyStatement({
@@ -870,8 +952,11 @@ export class SolutionDeployStack extends cdk.Stack {
       memorySize: 256,
       timeout: cdk.Duration.seconds(5),
       role: customResourceLambdaRole,
-      layers: [sharrLambdaLayer],
+      layers: [asrLambdaLayer],
     });
+
+    addCfnGuardSuppression(customResourceFunction, 'LAMBDA_INSIDE_VPC');
+    addCfnGuardSuppression(customResourceFunction, 'LAMBDA_CONCURRENCY_CHECK');
 
     new cdk.CustomResource(this, `ASR-DeploymentMetricsCustomResource`, {
       resourceType: 'Custom::DeploymentMetrics',
@@ -891,6 +976,8 @@ export class SolutionDeployStack extends cdk.Stack {
       ],
       true,
     );
+    addCfnGuardSuppression(customResourceLambdaRole, 'IAM_NO_INLINE_POLICY_CHECK');
+    addCfnGuardSuppression(customResourceLambdaRole, 'IAM_POLICYDOCUMENT_NO_WILDCARD_RESOURCE');
 
     const sortedPlaybookNames = [...securityStandardPlaybookNames].sort();
 
@@ -911,7 +998,11 @@ export class SolutionDeployStack extends cdk.Stack {
           },
           {
             Label: { default: 'CloudWatch Metrics' },
-            Parameters: cloudWatchMetrics.getParameterIds(),
+            Parameters: [...cloudWatchMetrics.getParameterIds(), enableEnhancedCloudWatchMetrics.logicalId],
+          },
+          {
+            Label: { default: '(Optional) Ticketing Service Integration' },
+            Parameters: [orchestrator.ticketGenFunctionNameParamId],
           },
         ],
         ParameterLabels: {
@@ -919,5 +1010,17 @@ export class SolutionDeployStack extends cdk.Stack {
         },
       },
     };
+
+    new CfnOutput(this, 'Generated Ticketing Lambda function ARN', {
+      description:
+        'The Lambda ARN constructed from the Ticket Generator Function Name you have provided as input to the stack. ' +
+        'This ARN is used by the solution to plug your ticketing function into the Orchestrator step function. ' +
+        'This field will be empty if you did not provide a ticketing Lambda Function name.',
+      value: orchestrator.ticketGenFunctionARN,
+    });
+  }
+
+  getPrimarySolutionSNSTopicARN(): string {
+    return this.primarySolutionSNSTopicARN;
   }
 }

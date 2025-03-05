@@ -6,6 +6,7 @@ import { Code, Function, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { Bucket } from 'aws-cdk-lib/aws-s3';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
+import { addCfnGuardSuppression } from './cdk-helper/add-cfn-nag-suppression';
 
 export interface WaitProviderProps {
   readonly serviceToken: string;
@@ -22,8 +23,7 @@ export interface WaitResourceProps {
   readonly createIntervalSeconds: number;
   readonly updateIntervalSeconds: number;
   readonly deleteIntervalSeconds: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly extraResourceProps?: { [_: string]: any };
+  readonly extraResourceProps?: Record<string, any>;
 }
 
 export class WaitProvider extends Construct {
@@ -67,6 +67,8 @@ export class WaitProvider extends Construct {
       assumedBy: new ServicePrincipal('lambda.amazonaws.com'),
       inlinePolicies: { LambdaPolicy: policyDocument },
     });
+    addCfnGuardSuppression(role, 'IAM_NO_INLINE_POLICY_CHECK');
+    addCfnGuardSuppression(role, 'IAM_POLICYDOCUMENT_NO_WILDCARD_RESOURCE');
 
     NagSuppressions.addResourceSuppressions(role, [
       {
@@ -87,6 +89,8 @@ export class WaitProvider extends Construct {
       environment: { LOG_LEVEL: 'INFO' },
       timeout: Duration.minutes(15),
     });
+    addCfnGuardSuppression(lambdaFunction, 'LAMBDA_CONCURRENCY_CHECK');
+    addCfnGuardSuppression(lambdaFunction, 'LAMBDA_INSIDE_VPC');
 
     return new WaitProvider(scope, id, { serviceToken: lambdaFunction.functionArn });
   }

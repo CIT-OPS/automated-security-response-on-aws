@@ -4,15 +4,7 @@
 import { Construct } from 'constructs';
 import { ControlRunbookDocument, ControlRunbookProps, RemediationScope } from './control_runbook';
 import { PlaybookProps } from '../lib/control_runbooks-construct';
-import {
-  AutomationStep,
-  AwsApiStep,
-  AwsService,
-  DataTypeEnum,
-  HardCodedString,
-  Output,
-  StringVariable,
-} from '@cdklabs/cdk-ssm-documents';
+import { HardCodedString, StringVariable } from '@cdklabs/cdk-ssm-documents';
 
 export function createControlRunbook(scope: Construct, id: string, props: PlaybookProps): ControlRunbookDocument {
   return new CNXC_EnableDynamoDB_DeleteProtection(scope, id, { ...props, controlId: 'DynamoDB.6' });
@@ -37,48 +29,24 @@ class CNXC_EnableDynamoDB_DeleteProtection extends ControlRunbookDocument {
   }
 
   /** @override */
-  protected getParseInputStepOutputs(): Output[] {
-    const outputs = super.getParseInputStepOutputs();
+  // protected getParseInputStepOutputs(): Output[] {
+  //   const outputs = super.getParseInputStepOutputs();
 
-    outputs.push({
-      name: 'TableRegion',
-      outputType: DataTypeEnum.STRING,
-      selector: '$.Payload.resource.Region',
-    });
+  //   outputs.push({
+  //     name: 'RemediationRegion',
+  //     outputType: DataTypeEnum.STRING,
+  //     selector: '$.Payload.resource.Region',
+  //   });
 
-    return outputs;
-  }
+  //   return outputs;
+  // }
 
   /** @override */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   protected getRemediationParams(): { [_: string]: any } {
     const params = super.getRemediationParams();
-
+    // params.Region = StringVariable.of('ParseInput.RemediationRegion');
     params.TableArn = StringVariable.of('ParseInput.TableArn');
     return params;
-  }
-
-  /** @override */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  protected getUpdateFindingStep(): AutomationStep {
-    return new AwsApiStep(this, 'UpdateFinding', {
-      service: AwsService.SECURITY_HUB,
-      pascalCaseApi: 'BatchUpdateFindings',
-      apiParams: {
-        FindingIdentifiers: [
-          {
-            Id: StringVariable.of('ParseInput.FindingId'),
-            ProductArn: StringVariable.of('ParseInput.ProductArn'),
-          },
-        ],
-        Note: {
-          Text: this.updateDescription,
-          UpdatedBy: this.documentName,
-        },
-        Workflow: { Status: 'RESOLVED' },
-      },
-      outputs: [],
-      isEnd: true,
-    });
   }
 }

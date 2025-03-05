@@ -1,16 +1,15 @@
 schemaVersion: '0.3'
 description: |
-  ### Document name - ASR-EnableStepFunctionLogging
+  ### Document name - ASR-CNXC_EnableStepFunctionLogging
 
   ## What does this document do?
-  Enables appropriate Step Function Logging:
+  Enables appropriate Generic Logging:
 
 
   ## Input Parameters
   * AutomationAssumeRole: (Required) The Amazon Resource Name (ARN) of the AWS Identity and Access Management (IAM) role that allows Systems Manager Automation to perform the actions on your behalf.
   * ResourceId: (Required) The Resource ID
-  * Region: (Required) Finding Region
-  * Accountid: (Required) Account Id
+  * ResourceType: (Required) Resource Type
 
   ## Output Parameters
   * Remediation.Output: STDOUT and messages from the remediation steps.
@@ -25,23 +24,40 @@ parameters:
     type: String
     description: The ARN of the resource
     allowedPattern: '(.*)$'
+  ResourceType:
+    type: String
+    description: The Type of the resource (ie AwsApiGatewayStage for REST and AwsApiGatewayV2Stage for v2)
+    allowedPattern: '^(AwsElbv2LoadBalancer|AwsApiGatewayStage|AwsStepFunctionsStateMachine|AwsApiGatewayV2Stage|AwsCloudFrontDistribution|AwsStepFunctionsStateMachine|AwsS3Bucket)$'
+  AccountId:
+    type: String
+    description: Account ID of the account for the finding
+    allowedPattern: ^[0-9]{12}$
   Region:
     type: String
     description: The REGION of the resource
     allowedPattern: '^[a-z]{2}(?:-gov)?-[a-z]+-\d$'
-  AccountId:
-    type: String
-    description: The Account Id of the resource
-    allowedPattern: '^[0-9]{12}$'
-  ResourceType:
-    type: String
-    description: The Type of the resource (ie AwsApiGatewayStage for REST and AwsApiGatewayV2Stage for v2)
-    allowedPattern: '(.*)$'
-
 outputs:
   - Remediation.Output
 
 mainSteps:
+  - name: CreateBucket
+    action: 'aws:executeScript'
+    outputs:
+      - Name: Output
+        Selector: $.Payload.response
+        Type: StringMap
+      - Name: LoggingBucket
+        Selector: $.Payload.loggingBucketName
+        Type: String
+    inputs:
+      InputPayload:
+        ResourceId: '{{ResourceId}}'
+        ResourceType: '{{ResourceType}}'
+      Runtime: python3.11
+      Handler: runbook_handler
+      Script: |-
+        %%SCRIPT=CNXC_CreateGenericLoggingBucket.py%%
+    isEnd: false
   - name: Remediation
     action: 'aws:executeScript'
     outputs:
@@ -51,12 +67,12 @@ mainSteps:
     inputs:
       InputPayload:
         ResourceId: '{{ResourceId}}'
-        Region: '{{Region}}'
-        AccountId: '{{AccountId}}'
+        Region: '{{global:REGION}}'
+        AccountId: '{{global:ACCOUNT_ID}}'
         ResourceType: '{{ResourceType}}'
-      Runtime: python3.8
+        LoggingBucket: '{{CreateBucket.LoggingBucket}}'
+      Runtime: python3.11
       Handler: runbook_handler
       Script: |-
         %%SCRIPT=CNXC_ApplyGenericLogging.py%%
-
     isEnd: true

@@ -68,6 +68,14 @@ class LogHandler(object):
             # if the stream was created in between the call ignore the error
             if type(e).__name__ == "ResourceAlreadyExistsException":
                 print("Log Stream already exists")
+                # Get the sequence token for the existing stream
+                response = get_logs_connection(self.apiclient).describe_log_streams(
+                    logGroupName=self.log_group, logStreamNamePrefix=log_stream, limit=1
+                )
+                if response["logStreams"]:
+                    self._stream_token = response["logStreams"][0].get(
+                        "uploadSequenceToken", "0"
+                    )
             elif type(e).__name__ == "ResourceNotFoundException":
                 if self._create_log_group():
                     get_logs_connection(self.apiclient).create_log_stream(
