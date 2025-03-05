@@ -11,7 +11,6 @@ import * as autoscaling_1 from '../ssmdocs/SC_AutoScaling.1';
 import * as autoscaling_3 from '../ssmdocs/SC_AutoScaling.3';
 import * as autoscaling_5 from '../ssmdocs/SC_Autoscaling.5'; // intentionally different casing to match SecurityHub generator id
 import * as athena_4 from '../ssmdocs/SC_Athena.4';
-import * as apigateway_1 from '../ssmdocs/SC_APIGateway.1'; // CNXC
 import * as apigateway_4 from '../ssmdocs/SC_APIGateway.4'; // CNXC
 import * as cloudformation_1 from '../ssmdocs/SC_CloudFormation.1';
 import * as cloudfront_1 from '../ssmdocs/SC_CloudFront.1';
@@ -78,7 +77,6 @@ import * as secretsmanager_3 from '../ssmdocs/SC_SecretsManager.3';
 import * as secretsmanager_4 from '../ssmdocs/SC_SecretsManager.4';
 import * as sqs_1 from '../ssmdocs/SC_SQS.1';
 import * as sns_1 from '../ssmdocs/SC_SNS.1';
-import * as sns_2 from '../ssmdocs/SC_SNS.2';
 import * as ssm_1 from '../ssmdocs/SC_SSM.1';
 import * as stepfunctions_1 from '../ssmdocs/SC_StepFunctions.1';
 import * as ssm_4 from '../ssmdocs/SC_SSM.4';
@@ -99,13 +97,17 @@ export interface PlaybookProps {
 
 const controlRunbooksRecord: Record<string, any> = {
   'Athena.4': athena_4.createControlRunbook,
-  'APIGateway.1': apigateway_1.createControlRunbook,
+  'APIGateway.1': apigateway_1.createControlRunbook, //CNXC
+  'APIGateway.4': apigateway_4.createControlRunbook, //CNXC
   'APIGateway.5': apigateway_5.createControlRunbook,
   'AutoScaling.1': autoscaling_1.createControlRunbook,
   'AutoScaling.3': autoscaling_3.createControlRunbook,
   'Autoscaling.5': autoscaling_5.createControlRunbook,
   'CloudFormation.1': cloudformation_1.createControlRunbook,
-  'CloudFront.1': cloudfront_1.createControlRunbook,
+  'CloudFront.1': cloudfront_1.createControlRunbook, //CNXC
+  'CloudFront.3': cloudfront_1.createControlRunbook, //CNXC
+  'CloudFront.5': cloudfront_1.createControlRunbook, //CNXC
+  'CloudFront.6': cloudfront_1.createControlRunbook, //CNXC
   'CloudFront.12': cloudfront_12.createControlRunbook,
   'CloudTrail.1': cloudtrail_1.createControlRunbook,
   'CloudTrail.2': cloudtrail_2.createControlRunbook,
@@ -118,6 +120,8 @@ const controlRunbooksRecord: Record<string, any> = {
   'CodeBuild.2': codebuild_2.createControlRunbook,
   'CodeBuild.5': codebuild_5.createControlRunbook,
   'Config.1': config_1.createControlRunbook,
+  'DynamoDB.2': dynamodb_2.createControlRunbook, // CNXC
+  'DynamoDB.6': dynamodb_6.createControlRunbook, // CNXC
   'EC2.1': ec2_1.createControlRunbook,
   'EC2.2': ec2_2.createControlRunbook,
   'EC2.4': ec2_4.createControlRunbook,
@@ -130,6 +134,7 @@ const controlRunbooksRecord: Record<string, any> = {
   'EC2.18': ec2_18.createControlRunbook,
   'EC2.19': ec2_19.createControlRunbook,
   'EC2.23': ec2_23.createControlRunbook,
+  'ELB.5': elb_5.createControlRunbook, //CNXC
   'ECR.1': ecr_1.createControlRunbook,
   'GuardDuty.1': guardduty_1.createControlRunbook,
   'GuardDuty.2': guardduty_2.createControlRunbook,
@@ -158,6 +163,7 @@ const controlRunbooksRecord: Record<string, any> = {
   'S3.4': s3_4.createControlRunbook,
   'S3.5': s3_5.createControlRunbook,
   'S3.6': s3_6.createControlRunbook,
+  'S3.9': s3_9.createControlRunbook, // CNXC
   'S3.11': s3_11.createControlRunbook,
   'S3.13': s3_13.createControlRunbook,
   'SecretsManager.1': secretsmanager_1.createControlRunbook,
@@ -165,9 +171,9 @@ const controlRunbooksRecord: Record<string, any> = {
   'SecretsManager.4': secretsmanager_4.createControlRunbook,
   'SQS.1': sqs_1.createControlRunbook,
   'SNS.1': sns_1.createControlRunbook,
-  'SNS.2': sns_2.createControlRunbook,
   'SSM.1': ssm_1.createControlRunbook,
   'SSM.4': ssm_4.createControlRunbook,
+  'StepFunctions.1': stepfunctions_1.createControlRunbook, //CNXC
   'Macie.1': macie_1.createControlRunbook,
 };
 
@@ -186,6 +192,7 @@ export class ControlRunbooks extends Construct {
       const controlId = remediation.control;
 
       if (remediation.executes) continue; // Skip remediations that map to other controls
+      console.log(`Control ID: ${controlId}`);
       this.add(controlRunbooksRecord[controlId](this, controlId, props));
     }
   }

@@ -220,7 +220,7 @@ export function getRegexRegistry(): RegexRegistry {
   registry.addCase(new RegexTestCase(String.raw`^[a-zA-Z][a-zA-Z0-9-_:]{0,30}$`, 'Resource Type', [], []));
   registry.addCase(
     new RegexTestCase(
-      String.raw`^(AwsElbv2LoadBalancer|AwsApiGatewayStage|AwsStepFunctionsStateMachine|AwsApiGatewayV2Stage|AwsCloudFrontDistribution)$`,
+      String.raw`^(AwsElbv2LoadBalancer|AwsApiGatewayStage|AwsStepFunctionsStateMachine|AwsApiGatewayV2Stage|AwsCloudFrontDistribution|AwsStepFunctionsStateMachine|AwsS3Bucket)$`,
       'API Gateway Stages',
       [],
       [],

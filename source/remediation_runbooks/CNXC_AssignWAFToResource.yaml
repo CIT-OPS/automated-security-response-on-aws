@@ -61,10 +61,10 @@ mainSteps:
         Region: '{{Region}}'
         AccountId: '{{AccountId}}'
         ResourceType: '{{ResourceType}}'
-      Runtime: python3.8
+      Runtime: python3.11
       Handler: runbook_handler
       Script: |-
-        %%SCRIPT=CNXC_CreateWAF.py%%
+        %%SCRIPT=CNXC_CreateDefaultWAF.py%%
     isEnd: false
   - name: Remediation
     action: 'aws:executeScript'
@@ -77,8 +77,8 @@ mainSteps:
         ResourceId: '{{ResourceId}}'
         ResourceType: '{{ResourceType}}'
         WAF_ARN: '{{GetOrCreateDefaultWAF.WAF_ARN}}'
-      Runtime: python3.8
+      Runtime: python3.11
       Handler: runbook_handler
       Script: |-
-        %%SCRIPT=CNXC_AssignWAF.py%%
+        %%SCRIPT=CNXC_AssignWAFToResource.py%%
     isEnd: true

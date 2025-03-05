@@ -6,13 +6,13 @@
     "exactOptionalPropertyTypes": false, // not possible with CDK
     "noFallthroughCasesInSwitch": true,
     "noImplicitAny": true,
-    "noImplicitOverride": true,
+    "noImplicitOverride": false, // TODO: enable
     "noImplicitReturns": true,
     "noImplicitThis": true,
-    "noPropertyAccessFromIndexSignature": false,
-    "noUncheckedIndexedAccess": false,
+    "noPropertyAccessFromIndexSignature": false, // TODO: enable
+    "noUncheckedIndexedAccess": false, // TODO: enable
     "noUnusedLocals": true,
-    "noUnusedParameters": false,
+    "noUnusedParameters": false, // TODO: enable
     "strict": true,
     "allowUmdGlobalAccess": false,
     "module": "commonjs",
@@ -23,7 +23,7 @@
     "inlineSourceMap": true,
     "inlineSources": true,
     "outDir": "dist",
-    "allowJs": true,
+    "allowJs": false,
     "forceConsistentCasingInFileNames": true,
     "lib": ["es2022"],
     "target": "es2022",

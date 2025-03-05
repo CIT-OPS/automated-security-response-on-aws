@@ -1478,6 +1478,7 @@ export class RemediationRunbookStack extends cdk.Stack {
         solutionVersion: props.solutionVersion,
         solutionDistBucket: props.solutionDistBucket,
         solutionId: props.solutionId,
+        namespace: namespace,
       });
       // CFN-NAG
       // WARN W12: IAM policy should not allow * resource
@@ -1529,6 +1530,7 @@ export class RemediationRunbookStack extends cdk.Stack {
         solutionVersion: props.solutionVersion,
         solutionDistBucket: props.solutionDistBucket,
         solutionId: props.solutionId,
+        namespace: namespace,
       });
       // CFN-NAG
       // WARN W12: IAM policy should not allow * resource
@@ -1580,6 +1582,7 @@ export class RemediationRunbookStack extends cdk.Stack {
         solutionVersion: props.solutionVersion,
         solutionDistBucket: props.solutionDistBucket,
         solutionId: props.solutionId,
+        namespace: namespace,
       });
       // CFN-NAG
       // WARN W12: IAM policy should not allow * resource
@@ -1625,6 +1628,7 @@ export class RemediationRunbookStack extends cdk.Stack {
         solutionVersion: props.solutionVersion,
         solutionDistBucket: props.solutionDistBucket,
         solutionId: props.solutionId,
+        namespace: namespace,
       });
       const childToMod = inlinePolicy.node.findChild('Resource') as CfnPolicy;
       childToMod.cfnOptions.metadata = {
@@ -1685,6 +1689,7 @@ export class RemediationRunbookStack extends cdk.Stack {
         solutionVersion: props.solutionVersion,
         solutionDistBucket: props.solutionDistBucket,
         solutionId: props.solutionId,
+        namespace: namespace,
       });
       const childToMod = inlinePolicy.node.findChild('Resource') as CfnPolicy;
       childToMod.cfnOptions.metadata = {
@@ -1745,6 +1750,7 @@ export class RemediationRunbookStack extends cdk.Stack {
         solutionVersion: props.solutionVersion,
         solutionDistBucket: props.solutionDistBucket,
         solutionId: props.solutionId,
+        namespace: namespace,
       });
       const childToMod = inlinePolicy.node.findChild('Resource') as CfnPolicy;
       childToMod.cfnOptions.metadata = {
@@ -1787,54 +1793,7 @@ export class RemediationRunbookStack extends cdk.Stack {
         solutionVersion: props.solutionVersion,
         solutionDistBucket: props.solutionDistBucket,
         solutionId: props.solutionId,
-      });
-      const childToMod = inlinePolicy.node.findChild('Resource') as CfnPolicy;
-      childToMod.cfnOptions.metadata = {
-        cfn_nag: {
-          rules_to_suppress: [
-            {
-              id: 'W12',
-              reason: 'Resource * is required for to allow remediation for any resource.',
-            },
-          ],
-        },
-      };
-    }
-
-    //-----------------------
-    // EnableSNSDeliveryLogging
-    //
-    {
-      const remediationName = 'EnableSNSDeliveryLogging';
-      const inlinePolicy = new Policy(props.roleStack, `SHARR-Remediation-Policy-${remediationName}`);
-
-      const remediationPolicy1 = new PolicyStatement();
-      remediationPolicy1.addActions('sns:SetTopicAttributes');
-      remediationPolicy1.effect = Effect.ALLOW;
-      remediationPolicy1.addResources('*');
-      inlinePolicy.addStatements(remediationPolicy1);
-
-      const remediationPolicy2 = new PolicyStatement();
-      remediationPolicy2.addActions('iam:*');
-      remediationPolicy2.effect = Effect.ALLOW;
-      remediationPolicy2.addResources('*');
-      inlinePolicy.addStatements(remediationPolicy2);
-
-      new SsmRole(props.roleStack, 'RemediationRole ' + remediationName, {
-        solutionId: props.solutionId,
-        ssmDocName: remediationName,
-        remediationPolicy: inlinePolicy,
-        remediationRoleName: `${remediationRoleNameBase}${remediationName}`,
-      });
-
-      RunbookFactory.createRemediationRunbook(this, 'ASR ' + remediationName, {
-        ssmDocName: remediationName,
-        ssmDocPath: ssmdocs,
-        ssmDocFileName: `${remediationName}.yaml`,
-        scriptPath: `${ssmdocs}/scripts`,
-        solutionVersion: props.solutionVersion,
-        solutionDistBucket: props.solutionDistBucket,
-        solutionId: props.solutionId,
+        namespace: namespace,
       });
       const childToMod = inlinePolicy.node.findChild('Resource') as CfnPolicy;
       childToMod.cfnOptions.metadata = {
@@ -1877,6 +1836,7 @@ export class RemediationRunbookStack extends cdk.Stack {
         solutionVersion: props.solutionVersion,
         solutionDistBucket: props.solutionDistBucket,
         solutionId: props.solutionId,
+        namespace: namespace,
       });
       const childToMod = inlinePolicy.node.findChild('Resource') as CfnPolicy;
       childToMod.cfnOptions.metadata = {

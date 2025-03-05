@@ -163,7 +163,7 @@ export class AdministratorStack extends cdk.Stack {
       policyName: RESOURCE_NAME_PREFIX + '-SHARR_Orchestrator',
       statements: [
         new PolicyStatement({
-          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
+          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
           resources: ['*'],
         }),
         new PolicyStatement({
@@ -441,7 +441,7 @@ export class AdministratorStack extends cdk.Stack {
       policyName: RESOURCE_NAME_PREFIX + '-SHARR_Orchestrator_Notifier',
       statements: [
         new PolicyStatement({
-          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
+          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
           resources: ['*'],
         }),
         new PolicyStatement({
@@ -601,7 +601,7 @@ export class AdministratorStack extends cdk.Stack {
           resources: ['*'],
         }),
         new PolicyStatement({
-          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
+          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
           resources: ['*'],
         }),
         new PolicyStatement({
@@ -845,7 +845,7 @@ export class AdministratorStack extends cdk.Stack {
       policyName: RESOURCE_NAME_PREFIX + '-SHARR_Scheduling_Lambda',
       statements: [
         new PolicyStatement({
-          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
+          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
           resources: ['*'],
         }),
         new PolicyStatement({
@@ -920,7 +920,7 @@ export class AdministratorStack extends cdk.Stack {
       statements: [
         new PolicyStatement({ actions: ['cloudwatch:PutMetricData'], resources: ['*'] }),
         new PolicyStatement({
-          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
+          actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
           resources: ['*'],
         }),
         new PolicyStatement({

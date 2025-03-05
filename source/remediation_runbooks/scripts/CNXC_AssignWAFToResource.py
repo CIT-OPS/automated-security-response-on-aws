@@ -1,15 +1,7 @@
-from typing import Dict, List, Literal, TypedDict
-
 import boto3
 from botocore.config import Config
 
-
-class Response(TypedDict):
-    Action: str
-    Message: str
-
-
-responses: Dict[Literal["AssociateWAFResponse"], List[Response]] = {}
+responses = {}
 responses["AssociateWAFResponse"] = []
 
 

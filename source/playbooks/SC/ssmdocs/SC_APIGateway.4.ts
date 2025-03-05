@@ -5,9 +5,9 @@ import { Construct } from 'constructs';
 import { ControlRunbookDocument, ControlRunbookProps, RemediationScope } from './control_runbook';
 import { PlaybookProps } from '../lib/control_runbooks-construct';
 import {
-  AutomationStep,
-  AwsApiStep,
-  AwsService,
+  // AutomationStep,
+  // AwsApiStep,
+  // AwsService,
   DataTypeEnum,
   HardCodedString,
   Output,
@@ -32,22 +32,21 @@ export class EnableCloudFrontAPIGWWAFDocument extends ControlRunbookDocument {
     });
   }
 
-  // Start CNXC Changes
   /** @override */
   protected getParseInputStepOutputs(): Output[] {
     const outputs = super.getParseInputStepOutputs();
 
-    outputs.push({
-      name: 'Region',
-      outputType: DataTypeEnum.STRING,
-      selector: '$.Payload.resource.Region',
-    });
+    // outputs.push({
+    //   name: 'Region',
+    //   outputType: DataTypeEnum.STRING,
+    //   selector: '$.Payload.resource.Region',
+    // });
 
-    outputs.push({
-      name: 'AccountId',
-      outputType: DataTypeEnum.STRING,
-      selector: '$.Payload.account_id',
-    });
+    // outputs.push({
+    //   name: 'RemediationAccount',
+    //   outputType: DataTypeEnum.STRING,
+    //   selector: '$.Payload.account_id',
+    // });
 
     outputs.push({
       name: 'ResourceType',
@@ -63,34 +62,10 @@ export class EnableCloudFrontAPIGWWAFDocument extends ControlRunbookDocument {
   protected getRemediationParams(): { [_: string]: any } {
     const params = super.getRemediationParams();
 
-    params.Region = StringVariable.of('ParseInput.Region');
-    params.AccountId = StringVariable.of('ParseInput.AccountId');
+    params.Region = StringVariable.of('global:REGION');
+    params.AccountId = StringVariable.of('global:ACCOUNT_ID');
     params.ResourceType = StringVariable.of('ParseInput.ResourceType');
     return params;
   }
-
-  /** @override */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  protected getUpdateFindingStep(): AutomationStep {
-    return new AwsApiStep(this, 'UpdateFinding', {
-      service: AwsService.SECURITY_HUB,
-      pascalCaseApi: 'BatchUpdateFindings',
-      apiParams: {
-        FindingIdentifiers: [
-          {
-            Id: StringVariable.of('ParseInput.FindingId'),
-            ProductArn: StringVariable.of('ParseInput.ProductArn'),
-          },
-        ],
-        Note: {
-          Text: this.updateDescription,
-          UpdatedBy: this.documentName,
-        },
-        Workflow: { Status: 'RESOLVED' },
-      },
-      outputs: [],
-      isEnd: true,
-    });
-    // End CNXC Changes
-  }
+  // End CNXC Changes
 }

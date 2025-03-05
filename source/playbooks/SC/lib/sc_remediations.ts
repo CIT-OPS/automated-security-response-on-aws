@@ -8,13 +8,17 @@ import { compareVersions } from 'compare-versions';
 // versionAdded is set to 2.1.0 for all remediations added up to that release
 const remediations: IControl[] = [
   { control: 'Athena.4', versionAdded: '2.2.0' },
-  { control: 'APIGateway.1', versionAdded: '2.2.0' },
+  { control: 'APIGateway.1', versionAdded: '2.1.0' }, // CNXC API Gateway REST and WebSocket API execution logging should be enabled
+  { control: 'APIGateway.3', executes: 'APIGateway.1', versionAdded: '2.1.0' }, // CNXC Remediation added in <2.1.0
+  { control: 'APIGateway.4', versionAdded: '2.1.0' }, // CNXC Remediation added in <2.1.0
   { control: 'APIGateway.5', versionAdded: '2.2.0' },
   { control: 'AutoScaling.1', versionAdded: '2.1.0' },
   { control: 'AutoScaling.3', versionAdded: '2.2.0' },
   { control: 'Autoscaling.5', versionAdded: '2.2.0' },
   { control: 'CloudFormation.1', versionAdded: '2.1.0' },
   { control: 'CloudFront.1', versionAdded: '2.1.0' },
+  { control: 'CloudFront.3', executes: 'CloudFront.1', versionAdded: '2.1.0' }, // CNXC Remediation added in <2.1.0
+  { control: 'CloudFront.5', executes: 'CloudFront.1', versionAdded: '2.1.0' }, // CNXC Remediation added in <2.1.0
   { control: 'CloudFront.12', versionAdded: '2.1.0' },
   { control: 'CloudTrail.1', versionAdded: '2.1.0' },
   { control: 'CloudTrail.2', versionAdded: '2.1.0' },
@@ -88,14 +92,13 @@ const remediations: IControl[] = [
   { control: 'S3.5', versionAdded: '2.1.0' },
   { control: 'S3.6', versionAdded: '2.1.0' },
   { control: 'S3.8', executes: 'S3.2', versionAdded: '2.1.0' },
-  { control: 'S3.9', executes: 'CloudTrail.7', versionAdded: '2.1.0' },
+  // { control: 'S3.9', executes: 'CloudTrail.7', versionAdded: '2.1.0' }, DONT USE AWS VERSION
   { control: 'S3.11', versionAdded: '2.1.0' },
   { control: 'S3.13', versionAdded: '2.1.0' },
   { control: 'SecretsManager.1', versionAdded: '2.1.0' },
   { control: 'SecretsManager.3', versionAdded: '2.1.0' },
   { control: 'SecretsManager.4', versionAdded: '2.1.0' },
   { control: 'SNS.1', versionAdded: '2.1.0' },
-  { control: 'SNS.2', versionAdded: '2.1.0' },
   { control: 'SQS.1', versionAdded: '2.1.0' },
   { control: 'SSM.1', versionAdded: '2.2.0' },
   { control: 'SSM.4', versionAdded: '2.1.0' },
@@ -103,6 +106,11 @@ const remediations: IControl[] = [
   { control: 'GuardDuty.2', versionAdded: '2.2.0' },
   { control: 'GuardDuty.4', executes: 'GuardDuty.2', versionAdded: '2.2.0' },
   { control: 'Macie.1', versionAdded: '2.2.0' },
+  { control: 'DynamoDB.2', versionAdded: '2.1.0' }, // CNXC DynamoDB tables should have point-in-time recovery enabled
+  { control: 'DynamoDB.6', versionAdded: '2.1.0' }, // CNXC DynamoDB tables should have deletion protection enabled
+  { control: 'ELB.5', versionAdded: '2.1.0' }, // CNXC Remediation added in <2.1.0
+  { control: 'S3.9', versionAdded: '2.1.0' }, // CNXC Remediation added in 2.1.0
+  { control: 'StepFunctions.1', versionAdded: '2.1.0' }, // CNXC Remediation added in 2.1.0
 ];
 export const SC_REMEDIATIONS: IControl[] = [...remediations].sort((controlA, controlB) =>
   compareVersions(controlA.versionAdded, controlB.versionAdded),

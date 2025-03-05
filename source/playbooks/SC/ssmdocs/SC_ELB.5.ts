@@ -4,15 +4,7 @@
 import { Construct } from 'constructs';
 import { ControlRunbookDocument, ControlRunbookProps, RemediationScope } from './control_runbook';
 import { PlaybookProps } from '../lib/control_runbooks-construct';
-import {
-  AutomationStep,
-  AwsApiStep,
-  AwsService,
-  DataTypeEnum,
-  HardCodedString,
-  Output,
-  StringVariable,
-} from '@cdklabs/cdk-ssm-documents';
+import { DataTypeEnum, HardCodedString, Output, StringVariable } from '@cdklabs/cdk-ssm-documents';
 
 export function createControlRunbook(scope: Construct, id: string, props: PlaybookProps): ControlRunbookDocument {
   return new CNXC_EnableAPIGatewayLoggingDocument(scope, id, { ...props, controlId: 'ELB.5' });
@@ -38,22 +30,16 @@ class CNXC_EnableAPIGatewayLoggingDocument extends ControlRunbookDocument {
     const outputs = super.getParseInputStepOutputs();
 
     outputs.push({
-      name: 'Region',
-      outputType: DataTypeEnum.STRING,
-      selector: '$.Payload.resource.Region',
-    });
-
-    outputs.push({
-      name: 'AccountId',
-      outputType: DataTypeEnum.STRING,
-      selector: '$.Payload.account_id',
-    });
-
-    outputs.push({
       name: 'ResourceType',
       outputType: DataTypeEnum.STRING,
       selector: '$.Payload.object.Type',
     });
+
+    // outputs.push({
+    //   name: 'RemediationAccount',
+    //   outputType: DataTypeEnum.STRING,
+    //   selector: '$.Payload.account_id',
+    // });
 
     return outputs;
   }
@@ -63,33 +49,9 @@ class CNXC_EnableAPIGatewayLoggingDocument extends ControlRunbookDocument {
   protected getRemediationParams(): { [_: string]: any } {
     const params = super.getRemediationParams();
 
-    params.Region = StringVariable.of('ParseInput.Region');
-    params.AccountId = StringVariable.of('ParseInput.AccountId');
+    params.Region = StringVariable.of('global:REGION');
+    params.AccountId = StringVariable.of('global:ACCOUNT_ID');
     params.ResourceType = StringVariable.of('ParseInput.ResourceType');
     return params;
-  }
-
-  /** @override */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  protected getUpdateFindingStep(): AutomationStep {
-    return new AwsApiStep(this, 'UpdateFinding', {
-      service: AwsService.SECURITY_HUB,
-      pascalCaseApi: 'BatchUpdateFindings',
-      apiParams: {
-        FindingIdentifiers: [
-          {
-            Id: StringVariable.of('ParseInput.FindingId'),
-            ProductArn: StringVariable.of('ParseInput.ProductArn'),
-          },
-        ],
-        Note: {
-          Text: this.updateDescription,
-          UpdatedBy: this.documentName,
-        },
-        Workflow: { Status: 'RESOLVED' },
-      },
-      outputs: [],
-      isEnd: true,
-    });
   }
 }
