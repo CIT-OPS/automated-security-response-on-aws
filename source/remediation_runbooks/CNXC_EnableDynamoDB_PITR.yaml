@@ -1,0 +1,46 @@
+schemaVersion: '0.3'
+description: |
+  ### Document name - ASR-EnableDynamoDB_PITR
+
+  ## What does this document do?
+  Enables Point In Time Recovery on a DynamoDB Table:
+  * Turns on PITR for specified table.
+
+  ## Input Parameters
+  * AutomationAssumeRole: (Required) The Amazon Resource Name (ARN) of the AWS Identity and Access Management (IAM) role that allows Systems Manager Automation to perform the actions on your behalf.
+  * TableArn: Table arn to set PITR Recovery on
+
+  ## Output Parameters
+  * Remediation.Output: STDOUT and messages from the remediation steps.
+
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Required) The ARN of the role that allows Automation to perform the actions on your behalf.
+    allowedPattern: '^arn:(?:aws|aws-us-gov|aws-cn):iam::\d{12}:role/[\w+=,.@-]+$'
+  TableArn:
+    type: String
+    description: The ARN of a DynamoDB table to set PITR on
+    allowedPattern: '(.*)$'
+
+outputs:
+  - Remediation.Output
+
+mainSteps:
+  - name: Remediation
+    action: 'aws:executeScript'
+    outputs:
+      - Name: Output
+        Selector: $.Payload
+        Type: StringMap
+    inputs:
+      InputPayload:
+        tableArn: '{{TableArn}}'
+        tableRegion: '{{global:REGION}}'
+      Runtime: python3.8
+      Handler: lambda_handler
+      Script: |-
+        %%SCRIPT=CNXC_EnableDynamoDB_PITR.py%%
+
+    isEnd: true

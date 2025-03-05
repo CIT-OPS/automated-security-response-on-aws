@@ -1,33 +1,35 @@
-// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright CONCENTRIX. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { Construct } from 'constructs';
 import { ControlRunbookDocument, ControlRunbookProps, RemediationScope } from './control_runbook';
 import { PlaybookProps } from '../lib/control_runbooks-construct';
 import {
   AutomationStep,
+  AwsApiStep,
+  AwsService,
   DataTypeEnum,
+  HardCodedString,
   Output,
-  StringFormat,
-  StringListVariable,
   StringVariable,
 } from '@cdklabs/cdk-ssm-documents';
 
 export function createControlRunbook(scope: Construct, id: string, props: PlaybookProps): ControlRunbookDocument {
-  return new EnableAPIGatewayExecutionLogsDocument(scope, id, { ...props, controlId: 'APIGateway.1' });
+  return new CNXC_EnableAPIGatewayLoggingDocument(scope, id, { ...props, controlId: 'APIGateway.1' });
 }
 
-export class EnableAPIGatewayExecutionLogsDocument extends ControlRunbookDocument {
+class CNXC_EnableAPIGatewayLoggingDocument extends ControlRunbookDocument {
   constructor(scope: Construct, id: string, props: ControlRunbookProps) {
     super(scope, id, {
       ...props,
       securityControlId: 'APIGateway.1',
-      remediationName: 'EnableAPIGatewayExecutionLogs',
-      scope: RemediationScope.REGIONAL,
-      resourceIdName: 'APIGatewayStageArnSuffix',
-      resourceIdRegex: String.raw`^arn:(?:aws|aws-cn|aws-us-gov):apigateway:(?:[a-z]{2}(?:-gov)?-[a-z]+-\d)::(\/restapis\/(.+)\/stages\/(.+)|\/apis\/(.+)\/stages\/(.+))$`,
-      updateDescription: new StringFormat('Log level set to %s in Stage.', [
-        StringVariable.of(`GetInputParams.loggingLevel`),
-      ]),
+      otherControlIds: ['APIGateway.3', 'APIGateway.9'],
+      remediationName: 'CNXC_EnableAPIGatewayLogging',
+      scope: RemediationScope.GLOBAL,
+      resourceIdName: 'ResourceId',
+      resourceIdRegex: String.raw`(.*)$`,
+      updateDescription: HardCodedString.of('Enabled API Gateway execution logging'),
+      header:
+        'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',
     });
   }
 
@@ -48,12 +50,36 @@ export class EnableAPIGatewayExecutionLogsDocument extends ControlRunbookDocumen
 
     return [loggingLevel];
   }
-
   protected override getRemediationParams(): Record<string, any> {
+
     const params: Record<string, any> = super.getRemediationParams();
 
     params.LoggingLevel = StringListVariable.of('GetInputParams.loggingLevel');
 
+    params.Region = StringVariable.of('ParseInput.Region');
+    params.AccountId = StringVariable.of('ParseInput.AccountId');
+    params.ResourceType = StringVariable.of('ParseInput.ResourceType');
     return params;
+  }
+  protected getUpdateFindingStep(): AutomationStep {
+    return new AwsApiStep(this, 'UpdateFinding', {
+      service: AwsService.SECURITY_HUB,
+      pascalCaseApi: 'BatchUpdateFindings',
+      apiParams: {
+        FindingIdentifiers: [
+          {
+            Id: StringVariable.of('ParseInput.FindingId'),
+            ProductArn: StringVariable.of('ParseInput.ProductArn'),
+          },
+        ],
+        Note: {
+          Text: this.updateDescription,
+          UpdatedBy: this.documentName,
+        },
+        Workflow: { Status: 'RESOLVED' },
+      },
+      outputs: [],
+      isEnd: true,
+    });
   }
 }

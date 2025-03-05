@@ -1,6 +1,6 @@
-// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+/* eslint-disable header/header */
+// Copyright CONCENTRIX. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-
 import { Construct } from 'constructs';
 import { ControlRunbookDocument, ControlRunbookProps, RemediationScope } from './control_runbook';
 import { PlaybookProps } from '../lib/control_runbooks-construct';
@@ -12,28 +12,27 @@ import {
   HardCodedString,
   Output,
   StringVariable,
-} from '@cdklabs/cdk-ssm-documents'; // CNXC Changed the import path
+} from '@cdklabs/cdk-ssm-documents';
 
 export function createControlRunbook(scope: Construct, id: string, props: PlaybookProps): ControlRunbookDocument {
-  return new EnableCloudFrontDefaultRootObjectDocument(scope, id, { ...props, controlId: 'CloudFront.1' });
+  return new CNXC_EnableStepFunctionLoggingDocument(scope, id, { ...props, controlId: 'StepFunctions.1' });
 }
 
-export class EnableCloudFrontDefaultRootObjectDocument extends ControlRunbookDocument {
-  constructor(stage: Construct, id: string, props: ControlRunbookProps) {
-    super(stage, id, {
+class CNXC_EnableStepFunctionLoggingDocument extends ControlRunbookDocument {
+  constructor(scope: Construct, id: string, props: ControlRunbookProps) {
+    super(scope, id, {
       ...props,
-      securityControlId: 'CloudFront.1',
-      otherControlIds: ['CloudFront.3', 'CloudFront.5'], // CNXC Added the otherControlIds
-      remediationName: 'CNXC_EnableCloudfrontLogging', // CNXC Changed the remediationName to a Concentrix one
+      securityControlId: 'StepFunctions.1',
+      remediationName: 'CNXC_EnableStepFunctionLogging',
       scope: RemediationScope.GLOBAL,
-      //resourceIdName: 'CloudFrontDistribution', // CNXC Changed the resourceIdName
-      resourceIdName: 'ResourceId', // CNXC Changed the resourceIdName
-      resourceIdRegex: String.raw`^(arn:(?:aws|aws-us-gov|aws-cn):cloudfront::\d{12}:distribution\/([A-Z0-9]+))$`,
-      updateDescription: HardCodedString.of('Configured CloudFront distribution'), // CNXC Override the updateDescription
+      resourceIdName: 'ResourceId',
+      resourceIdRegex: String.raw`(.*)$`,
+      updateDescription: HardCodedString.of('Enabled Stepfunction logging'),
+      header:
+        'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',
     });
   }
 
-  // Start CNXC Changes
   /** @override */
   protected getParseInputStepOutputs(): Output[] {
     const outputs = super.getParseInputStepOutputs();
@@ -92,6 +91,5 @@ export class EnableCloudFrontDefaultRootObjectDocument extends ControlRunbookDoc
       outputs: [],
       isEnd: true,
     });
-    // End CNXC Changes
   }
 }

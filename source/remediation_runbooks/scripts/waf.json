@@ -1,0 +1,94 @@
+{
+    "WebACL": {
+        "Name": "ASR-WAF",
+        "Id": "169e2ff6-6364-45cc-ab34-77f453532f48",
+        "ARN": "arn:aws:wafv2:us-east-1:234772128127:regional/webacl/ASR-WAF/169e2ff6-6364-45cc-ab34-77f453532f48",
+        "DefaultAction": {
+            "Allow": {}
+        },
+        "Description": "Default ASR Created WAF with basic protection rules",
+        "Rules": [
+            {
+                "Name": "AWS-AWSManagedRulesAmazonIpReputationList",
+                "Priority": 0,
+                "Statement": {
+                    "ManagedRuleGroupStatement": {
+                        "VendorName": "AWS",
+                        "Name": "AWSManagedRulesAmazonIpReputationList"
+                    }
+                },
+                "OverrideAction": {
+                    "None": {}
+                },
+                "VisibilityConfig": {
+                    "SampledRequestsEnabled": true,
+                    "CloudWatchMetricsEnabled": true,
+                    "MetricName": "AWS-AWSManagedRulesAmazonIpReputationList"
+                }
+            },
+            {
+                "Name": "AWS-AWSManagedRulesCommonRuleSet",
+                "Priority": 1,
+                "Statement": {
+                    "ManagedRuleGroupStatement": {
+                        "VendorName": "AWS",
+                        "Name": "AWSManagedRulesCommonRuleSet"
+                    }
+                },
+                "OverrideAction": {
+                    "None": {}
+                },
+                "VisibilityConfig": {
+                    "SampledRequestsEnabled": true,
+                    "CloudWatchMetricsEnabled": true,
+                    "MetricName": "AWS-AWSManagedRulesCommonRuleSet"
+                }
+            },
+            {
+                "Name": "AWS-AWSManagedRulesKnownBadInputsRuleSet",
+                "Priority": 2,
+                "Statement": {
+                    "ManagedRuleGroupStatement": {
+                        "VendorName": "AWS",
+                        "Name": "AWSManagedRulesKnownBadInputsRuleSet"
+                    }
+                },
+                "OverrideAction": {
+                    "None": {}
+                },
+                "VisibilityConfig": {
+                    "SampledRequestsEnabled": true,
+                    "CloudWatchMetricsEnabled": true,
+                    "MetricName": "AWS-AWSManagedRulesKnownBadInputsRuleSet"
+                }
+            },
+            {
+                "Name": "AWS-AWSManagedRulesSQLiRuleSet",
+                "Priority": 3,
+                "Statement": {
+                    "ManagedRuleGroupStatement": {
+                        "VendorName": "AWS",
+                        "Name": "AWSManagedRulesSQLiRuleSet"
+                    }
+                },
+                "OverrideAction": {
+                    "None": {}
+                },
+                "VisibilityConfig": {
+                    "SampledRequestsEnabled": true,
+                    "CloudWatchMetricsEnabled": true,
+                    "MetricName": "AWS-AWSManagedRulesSQLiRuleSet"
+                }
+            }
+        ],
+        "VisibilityConfig": {
+            "SampledRequestsEnabled": true,
+            "CloudWatchMetricsEnabled": true,
+            "MetricName": "ASR-WAF"
+        },
+        "Capacity": 1125,
+        "ManagedByFirewallManager": false,
+        "LabelNamespace": "awswaf:234772128127:webacl:ASR-WAF:"
+    },
+    "LockToken": "9461b2ce-bede-4720-b155-9a2a3622fc60"
+}

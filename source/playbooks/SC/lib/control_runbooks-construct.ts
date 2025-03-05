@@ -11,6 +11,8 @@ import * as autoscaling_1 from '../ssmdocs/SC_AutoScaling.1';
 import * as autoscaling_3 from '../ssmdocs/SC_AutoScaling.3';
 import * as autoscaling_5 from '../ssmdocs/SC_Autoscaling.5'; // intentionally different casing to match SecurityHub generator id
 import * as athena_4 from '../ssmdocs/SC_Athena.4';
+import * as apigateway_1 from '../ssmdocs/SC_APIGateway.1'; // CNXC
+import * as apigateway_4 from '../ssmdocs/SC_APIGateway.4'; // CNXC
 import * as cloudformation_1 from '../ssmdocs/SC_CloudFormation.1';
 import * as cloudfront_1 from '../ssmdocs/SC_CloudFront.1';
 import * as cloudfront_12 from '../ssmdocs/SC_CloudFront.12';
@@ -25,6 +27,8 @@ import * as cloudwatch_16 from '../ssmdocs/SC_CloudWatch.16';
 import * as codebuild_2 from '../ssmdocs/SC_CodeBuild.2';
 import * as codebuild_5 from '../ssmdocs/SC_CodeBuild.5';
 import * as config_1 from '../ssmdocs/SC_Config.1';
+import * as dynamodb_2 from '../ssmdocs/SC_DynamoDB.2'; // CNXC
+import * as dynamodb_6 from '../ssmdocs/SC_DynamoDB.6'; // CNXC
 import * as ec2_1 from '../ssmdocs/SC_EC2.1';
 import * as ec2_2 from '../ssmdocs/SC_EC2.2';
 import * as ec2_4 from '../ssmdocs/SC_EC2.4';
@@ -40,6 +44,7 @@ import * as ec2_23 from '../ssmdocs/SC_EC2.23';
 import * as ecr_1 from '../ssmdocs/SC_ECR.1';
 import * as guardduty_1 from '../ssmdocs/SC_GuardDuty.1';
 import * as guardduty_2 from '../ssmdocs/SC_GuardDuty.2';
+import * as elb_5 from '../ssmdocs/SC_ELB.5';
 import * as iam_3 from '../ssmdocs/SC_IAM.3';
 import * as iam_7 from '../ssmdocs/SC_IAM.7';
 import * as iam_8 from '../ssmdocs/SC_IAM.8';
@@ -65,6 +70,7 @@ import * as s3_2 from '../ssmdocs/SC_S3.2';
 import * as s3_4 from '../ssmdocs/SC_S3.4';
 import * as s3_5 from '../ssmdocs/SC_S3.5';
 import * as s3_6 from '../ssmdocs/SC_S3.6';
+import * as s3_9 from '../ssmdocs/SC_S3.9';
 import * as s3_11 from '../ssmdocs/SC_S3.11';
 import * as s3_13 from '../ssmdocs/SC_S3.13';
 import * as secretsmanager_1 from '../ssmdocs/SC_SecretsManager.1';
@@ -74,6 +80,7 @@ import * as sqs_1 from '../ssmdocs/SC_SQS.1';
 import * as sns_1 from '../ssmdocs/SC_SNS.1';
 import * as sns_2 from '../ssmdocs/SC_SNS.2';
 import * as ssm_1 from '../ssmdocs/SC_SSM.1';
+import * as stepfunctions_1 from '../ssmdocs/SC_StepFunctions.1';
 import * as ssm_4 from '../ssmdocs/SC_SSM.4';
 import * as macie_1 from '../ssmdocs/SC_Macie.1';
 import { IControl } from '../../../lib/sharrplaybook-construct';

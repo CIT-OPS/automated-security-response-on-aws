@@ -15,21 +15,20 @@ import {
 } from '@cdklabs/cdk-ssm-documents'; // CNXC Changed the import path
 
 export function createControlRunbook(scope: Construct, id: string, props: PlaybookProps): ControlRunbookDocument {
-  return new EnableCloudFrontDefaultRootObjectDocument(scope, id, { ...props, controlId: 'CloudFront.1' });
+  return new EnableCloudFrontAPIGWWAFDocument(scope, id, { ...props, controlId: 'APIGateway.4' });
 }
 
-export class EnableCloudFrontDefaultRootObjectDocument extends ControlRunbookDocument {
+export class EnableCloudFrontAPIGWWAFDocument extends ControlRunbookDocument {
   constructor(stage: Construct, id: string, props: ControlRunbookProps) {
     super(stage, id, {
       ...props,
-      securityControlId: 'CloudFront.1',
-      otherControlIds: ['CloudFront.3', 'CloudFront.5'], // CNXC Added the otherControlIds
-      remediationName: 'CNXC_EnableCloudfrontLogging', // CNXC Changed the remediationName to a Concentrix one
+      securityControlId: 'APIGateway.4',
+      otherControlIds: ['CloudFront.6'],
+      remediationName: 'CNXC_AssignWAFToResource',
       scope: RemediationScope.GLOBAL,
-      //resourceIdName: 'CloudFrontDistribution', // CNXC Changed the resourceIdName
-      resourceIdName: 'ResourceId', // CNXC Changed the resourceIdName
-      resourceIdRegex: String.raw`^(arn:(?:aws|aws-us-gov|aws-cn):cloudfront::\d{12}:distribution\/([A-Z0-9]+))$`,
-      updateDescription: HardCodedString.of('Configured CloudFront distribution'), // CNXC Override the updateDescription
+      resourceIdName: 'ResourceId',
+      resourceIdRegex: String.raw`(.*)$`,
+      updateDescription: HardCodedString.of('Configured WAF on resource'),
     });
   }
 

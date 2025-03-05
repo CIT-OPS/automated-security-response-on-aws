@@ -110,6 +110,7 @@ main() {
     mkdir -p "$template_dist_dir"/blueprints
 
     header "[Pack] Lambda Layer (used by playbooks)"
+
     # Check if poetry is available in the shell
       if command -v poetry >/dev/null 2>&1; then
         POETRY_COMMAND="poetry"
@@ -127,6 +128,8 @@ main() {
     cp "$source_dir"/layer/*.py "$temp_work_dir"/source/solution_deploy/lambdalayer/python/layer
     pip install -r "$template_dir"/requirements.txt -t "$temp_work_dir"/source/solution_deploy/lambdalayer/python/lib/python3.11/site-packages
     popd
+
+    echo "$temp_work_dir/source/solution_deploy/lambdalayer"
 
     pushd "$temp_work_dir"/source/solution_deploy/lambdalayer
     zip --recurse-paths "$build_dist_dir"/lambda/layer.zip python

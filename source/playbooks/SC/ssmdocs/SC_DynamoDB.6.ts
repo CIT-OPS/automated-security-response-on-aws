@@ -1,6 +1,6 @@
-// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+/* eslint-disable header/header */
+// Copyright CONCENTRIX. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-
 import { Construct } from 'constructs';
 import { ControlRunbookDocument, ControlRunbookProps, RemediationScope } from './control_runbook';
 import { PlaybookProps } from '../lib/control_runbooks-construct';
@@ -12,48 +12,38 @@ import {
   HardCodedString,
   Output,
   StringVariable,
-} from '@cdklabs/cdk-ssm-documents'; // CNXC Changed the import path
+} from '@cdklabs/cdk-ssm-documents';
 
 export function createControlRunbook(scope: Construct, id: string, props: PlaybookProps): ControlRunbookDocument {
-  return new EnableCloudFrontDefaultRootObjectDocument(scope, id, { ...props, controlId: 'CloudFront.1' });
+  return new CNXC_EnableDynamoDB_DeleteProtection(scope, id, { ...props, controlId: 'DynamoDB.6' });
 }
 
-export class EnableCloudFrontDefaultRootObjectDocument extends ControlRunbookDocument {
-  constructor(stage: Construct, id: string, props: ControlRunbookProps) {
-    super(stage, id, {
+class CNXC_EnableDynamoDB_DeleteProtection extends ControlRunbookDocument {
+  constructor(scope: Construct, id: string, props: ControlRunbookProps) {
+    const remediationName = 'CNXC_EnableDynamoDB_DeleteProtection';
+    super(scope, id, {
       ...props,
-      securityControlId: 'CloudFront.1',
-      otherControlIds: ['CloudFront.3', 'CloudFront.5'], // CNXC Added the otherControlIds
-      remediationName: 'CNXC_EnableCloudfrontLogging', // CNXC Changed the remediationName to a Concentrix one
+      securityControlId: 'DynamoDB.6',
+      remediationName,
       scope: RemediationScope.GLOBAL,
-      //resourceIdName: 'CloudFrontDistribution', // CNXC Changed the resourceIdName
-      resourceIdName: 'ResourceId', // CNXC Changed the resourceIdName
-      resourceIdRegex: String.raw`^(arn:(?:aws|aws-us-gov|aws-cn):cloudfront::\d{12}:distribution\/([A-Z0-9]+))$`,
-      updateDescription: HardCodedString.of('Configured CloudFront distribution'), // CNXC Override the updateDescription
+      resourceIdName: 'TableArn',
+      resourceIdRegex: String.raw`(.*)$`,
+      updateDescription: HardCodedString.of(
+        `Enabled delete protection on table using the ${props.solutionAcronym}-${remediationName} runbook.`,
+      ),
+      header:
+        'Copyright Concentrix CVG LLC or its affiliates. All Rights Reserved.\nSPDX-License-Identifier: Apache-2.0',
     });
   }
 
-  // Start CNXC Changes
   /** @override */
   protected getParseInputStepOutputs(): Output[] {
     const outputs = super.getParseInputStepOutputs();
 
     outputs.push({
-      name: 'Region',
+      name: 'TableRegion',
       outputType: DataTypeEnum.STRING,
       selector: '$.Payload.resource.Region',
-    });
-
-    outputs.push({
-      name: 'AccountId',
-      outputType: DataTypeEnum.STRING,
-      selector: '$.Payload.account_id',
-    });
-
-    outputs.push({
-      name: 'ResourceType',
-      outputType: DataTypeEnum.STRING,
-      selector: '$.Payload.object.Type',
     });
 
     return outputs;
@@ -64,9 +54,7 @@ export class EnableCloudFrontDefaultRootObjectDocument extends ControlRunbookDoc
   protected getRemediationParams(): { [_: string]: any } {
     const params = super.getRemediationParams();
 
-    params.Region = StringVariable.of('ParseInput.Region');
-    params.AccountId = StringVariable.of('ParseInput.AccountId');
-    params.ResourceType = StringVariable.of('ParseInput.ResourceType');
+    params.TableArn = StringVariable.of('ParseInput.TableArn');
     return params;
   }
 
@@ -92,6 +80,5 @@ export class EnableCloudFrontDefaultRootObjectDocument extends ControlRunbookDoc
       outputs: [],
       isEnd: true,
     });
-    // End CNXC Changes
   }
 }

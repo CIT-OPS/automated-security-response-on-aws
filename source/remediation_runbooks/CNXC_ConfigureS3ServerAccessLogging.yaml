@@ -1,0 +1,90 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+---
+schemaVersion: '0.3'
+description: |
+  ### Document name - ConfigureS3ServerAccessLogging
+
+  ## What does this document do?
+  Configures Bucket for S3 Server Access Logging:
+  * Creates a logging bucket in account / region if required.
+  * Validates the properties of the logging bucket.
+  * Configures the finding bucket to log to the logging bucket, unless the finding bucket and logging bucket are the same name.
+
+  ## Input Parameters
+  * AutomationAssumeRole: (Required) The Amazon Resource Name (ARN) of the AWS Identity and Access Management (IAM) role that allows Systems Manager Automation to perform the actions on your behalf.
+  * BucketName: 
+
+  ## Output Parameters
+  *
+
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Required) The ARN of the role that allows Automation to perform the actions on your behalf.
+    allowedPattern: '^arn:(?:aws|aws-us-gov|aws-cn):iam::\d{12}:role/[\w+=,.@-]+$'
+  BucketName:
+    type: String
+    description: (Required) The bucket name (not the ARN).
+    allowedPattern: (?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$)
+  Region:
+    type: String
+    description: (Required) The region to work in.
+    allowedPattern: '^[a-zA-Z0-9][a-zA-Z0-9-_]{0,255}$'
+  AccountId:
+    type: String
+    description: (Required) The account to work in.
+    allowedPattern: '^[a-zA-Z0-9][a-zA-Z0-9-_]{0,255}$'
+
+outputs:
+  - Remediation.message
+  - Remediation.status
+
+mainSteps:
+  - name: CreateLoggingBucket
+    action: 'aws:executeScript'
+    outputs:
+      - Name: LoggingBucketName
+        Selector: $.Payload.loggingBucketName
+        Type: String
+      - Name: Status
+        Selector: $.Payload.status
+        Type: String
+    inputs:
+      InputPayload:
+        BucketName: '{{BucketName}}'
+        Region: '{{Region}}'
+        AccountId: '{{AccountId}}'
+      Runtime: python3.8
+      Handler: runbook_handler
+      Script: |-
+        %%SCRIPT=CNXC_CreateS3ServerAccessLoggingBucket.py%%
+    isEnd: false
+  - name: Remediation
+    action: 'aws:executeScript'
+    outputs:
+      - Name: message
+        Selector: $.Payload.message
+        Type: String
+      - Name: resourceBucketName
+        Selector: $.Payload.resourceBucketName
+        Type: String
+      - Name: loggingBucketName
+        Selector: $.Payload.LoggingBucketName
+        Type: String
+      - Name: loggingPrefix
+        Selector: $.Payload.LoggingPrefix
+        Type: String
+      - Name: status
+        Selector: $.Payload.status
+        Type: String
+    inputs:
+      InputPayload:
+        BucketName: '{{BucketName}}'
+        LoggingBucketName: '{{CreateLoggingBucket.LoggingBucketName}}'
+      Runtime: python3.8
+      Handler: runbook_handler
+      Script: |-
+        %%SCRIPT=CNXC_CreateS3ServerAccessConfiguration.py%%
+    isEnd: true
