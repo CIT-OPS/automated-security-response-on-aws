@@ -51,3 +51,9 @@ source/test/__snapshots__/*.snap
 deployment/awscli-update-*
 deployment/s3-file-names.txt
 source/test/__snapshots__/*.snap
+
+#CNXC
+deployment/awscli-*
+deployment/pytest_cache/*
+deployment/s3-file-names.*
+mypi.ini

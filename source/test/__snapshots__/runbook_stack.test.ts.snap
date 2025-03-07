@@ -1772,9 +1772,9 @@ from botocore.exceptions import ClientError
 responses = {"EnableLogging": []}
 
 
-def add_response(action, message):
+def add_response(action, message, suppress=False):
     """Helper to create response objects."""
-    return {"Action": action, "Message": message}
+    return {"Action": action, "Suppress": suppress, "Message": message}
 
 
 def add_error(action, error_msg):
@@ -1817,115 +1817,122 @@ def createLogGroup(name, region, acct):
 
 def runbook_handler(event, context):
     """Handles AWS Config remediation runbook for enabling logging."""
-    try:
-        # Validate required fields
-        if "ResourceId" not in event:
-            raise ValueError("Missing required input: ResourceId")
 
-        if "ResourceType" not in event:
-            raise ValueError("Missing required input: ResourceId")
+    # Validate required fields
+    if "ResourceId" not in event:
+        raise ValueError("Missing required input: ResourceId")
 
-        res_type = event["ResourceType"]
+    if "ResourceType" not in event:
+        raise ValueError("Missing required input: ResourceType")
 
-        if res_type == "AwsS3Bucket":
-            res_id = event["ResourceId"]
-            svc_name = "s3"
-        else:
-            res_id = event["ResourceId"]
-            res_split = res_id.split(":")
-            svc_name = res_split[2]
+    res_type = event["ResourceType"]
 
-        res_type_map = {
-            "elasticloadbalancing": "AwsElbv2LoadBalancer",
-            "elb": "AwsElbv2LoadBalancer",
-            "apigateway": "AwsApiGatewayStage",
-            "execute-api": "AwsApiGatewayV2Stage",
-            "states": "AwsStepFunctionsStateMachine",
-            "cloudfront": "AwsCloudFrontDistribution",
-            "s3": "AwsS3Bucket",
-        }
-        res_type = res_type_map.get(svc_name, f"Unknown:{svc_name}")
+    if res_type == "AwsS3Bucket":
+        res_id = event["ResourceId"]
+        svc_name = "s3"
+    else:
+        res_id = event["ResourceId"]
+        res_split = res_id.split(":")
+        svc_name = res_split[2]
 
-        # Extract account ID
-        if "AccountId" in event and event["AccountId"]:
-            acct_id = event["AccountId"]
+    res_type_map = {
+        "elasticloadbalancing": "AwsElbv2LoadBalancer",
+        "elb": "AwsElbv2LoadBalancer",
+        "apigateway": "AwsApiGatewayStage",
+        "execute-api": "AwsApiGatewayV2Stage",
+        "states": "AwsStepFunctionsStateMachine",
+        "cloudfront": "AwsCloudFrontDistribution",
+        "s3": "AwsS3Bucket",
+    }
+    res_type = res_type_map.get(svc_name, "Unknown")
+
+    if res_type == "Unknown":
+        raise ValueError(f"Unknown resource type: {svc_name}")
+
+    # Extract account ID
+    if "AccountId" in event and event["AccountId"]:
+        acct_id = event["AccountId"]
+    else:
+        try:
+            acct_id = res_split[4]
+            if not acct_id or not acct_id.isdigit():
+                raise ValueError("Invalid account ID in resource ARN")
+        except (IndexError, ValueError) as e:
+            raise ValueError(f"Unable to extract valid account ID: {str(e)}")
+
+    # Determine region
+    if "Region" in event and event["Region"]:
+        region = event["Region"]
+    else:
+        if svc_name == "cloudfront" or "AwsCloudFrontDistribution" in event.get(
+            "ResourceType", ""
+        ):
+            region = "us-east-1"
         else:
             try:
-                acct_id = res_split[4]
-                if not acct_id or not acct_id.isdigit():
-                    raise ValueError("Invalid account ID in resource ARN")
-            except (IndexError, ValueError) as e:
-                raise ValueError(f"Unable to extract valid account ID: {str(e)}")
-
-        # Determine region
-        if "Region" in event and event["Region"]:
-            region = event["Region"]
-        else:
-            if svc_name == "cloudfront" or "AwsCloudFrontDistribution" in event.get(
-                "ResourceType", ""
-            ):
+                region = res_split[3] or "us-east-1"
+            except (IndexError, TypeError):
                 region = "us-east-1"
-            else:
-                try:
-                    region = res_split[3] or "us-east-1"
-                except (IndexError, TypeError):
-                    region = "us-east-1"
 
-        # Convert elasticloadbalancing to elb for consistency
-        if svc_name == "elasticloadbalancing":
-            svc_name = "elb"
+    # Convert elasticloadbalancing to elb for consistency
+    if svc_name == "elasticloadbalancing":
+        svc_name = "elb"
 
-        logging_bucket = event["LoggingBucket"]
+    logging_bucket = event["LoggingBucket"]
 
-        # Log the extracted information
-        print(f"[INFO] Using account ID: {acct_id} for resource: {res_id}")
-        print(f"[INFO] Using region: {region} for resource: {res_id}")
-        print(f"[INFO] Using resource type: {res_type} for resource: {res_id}")
-        print(f"[INFO] Using logging bucket: {logging_bucket} for resource: {res_id}")
-
-        # Map resource types to handlers
-        handlers = {
-            "AwsElbv2LoadBalancer": lambda: handle_elbv2(
-                res_id, region, svc_name, acct_id
-            ),
-            "AwsApiGatewayStage": lambda: handle_api_gateway_stage(
-                res_split, region, acct_id
-            ),
-            "AwsStepFunctionsStateMachine": lambda: handle_step_functions(
-                res_split, res_id, region, acct_id
-            ),
-            "AwsApiGatewayV2Stage": lambda: handle_api_gateway_v2_stage(
-                res_split, region, acct_id
-            ),
-            "AwsCloudFrontDistribution": lambda: handle_cloudfront_distribution(
-                res_split, region, acct_id, logging_bucket
-            ),
-            "AwsS3Bucket": lambda: handle_s3_bucket(
-                res_id, region, acct_id, logging_bucket
-            ),
-        }
-
-        # Execute appropriate handler
-        if res_type in handlers:
-            responses["EnableLogging"].append(handlers[res_type]())
-        else:
-            responses["EnableLogging"].append(
-                add_response(
-                    "ResourceTypeValidation", f"Unsupported resource type: {res_type}"
-                )
-            )
-
-        return {"output": "EnableLogging", "http_responses": responses}
-
-    except ValueError as ve:
-        return create_error_response("ValidationError", str(ve))
-    except ClientError as ce:
-        return create_error_response(
-            "AWSError",
-            f"AWS API Error: {ce.response['Error']['Code']} - {ce.response['Error']['Message']}",
+    # Log the extracted information
+    responses["EnableLogging"].append(
+        add_response("INFO", f"Using account ID: {acct_id} for resource: {res_id}")
+    )
+    responses["EnableLogging"].append(
+        add_response("INFO", f"Using region: {region} for resource: {res_id}")
+    )
+    responses["EnableLogging"].append(
+        add_response(
+            "INFO", f"Using logging bucket: {logging_bucket} for resource: {res_id}"
         )
-    except Exception as e:
-        return create_error_response("UnexpectedError", f"Unexpected error: {str(e)}")
+    )
+
+    # Map resource types to handlers
+    handlers = {
+        "AwsElbv2LoadBalancer": lambda: handle_elbv2(res_id, region, svc_name, acct_id),
+        "AwsApiGatewayStage": lambda: handle_api_gateway_stage(
+            res_split, region, acct_id
+        ),
+        "AwsStepFunctionsStateMachine": lambda: handle_step_functions(
+            res_split, res_id, region, acct_id
+        ),
+        "AwsApiGatewayV2Stage": lambda: handle_api_gateway_v2_stage(
+            res_split, region, acct_id
+        ),
+        "AwsCloudFrontDistribution": lambda: handle_cloudfront_distribution(
+            res_split, region, acct_id, logging_bucket
+        ),
+        "AwsS3Bucket": lambda: handle_s3_bucket(res_id, logging_bucket),
+    }
+
+    # Execute appropriate handler
+    if res_type in handlers:
+        responses["EnableLogging"].append(handlers[res_type]())
+    else:
+        responses["EnableLogging"].append(
+            add_response(
+                "ResourceTypeValidation", f"Unsupported resource type: {res_type}"
+            )
+        )
+
+    # Overall we will assume that the overall status is not to be suppressed unless indicated
+    # by the handler functions
+    message = "Requested Generic Logging"
+    for response in responses["EnableLogging"]:
+        if "Message" in response:
+            message = response["Message"]
+
+    return {
+        "status": "Success",
+        "message": message,
+        "details": responses,
+    }
 
 
 def handle_elbv2(res_id, region, svc, acct):
@@ -1956,6 +1963,7 @@ def handle_elbv2(res_id, region, svc, acct):
         )
     except Exception as e:
         return add_error("enable_logging", f"Unexpected error: {str(e)}")
+        raise RuntimeError(str(e))
 
 
 def setupAPIGatewayAccountSettings(acct, client):
@@ -2094,7 +2102,7 @@ def handle_api_gateway_stage(res_split, region, acct):
 
     except Exception as e:
         result.append(
-            add_error("enable_logging", f"Failed to configure API Gateway: {str(e)}")
+            add_error("update_stage", f"Failed to configure API Gateway: {str(e)}")
         )
 
     return result[0] if result else add_error("unknown", "No result generated")
@@ -2377,26 +2385,46 @@ def handle_cloudfront_distribution(res_split, region, acct, logging_bucket):
     return result[0] if result else add_error("unknown", "No result generated")
 
 
-def handle_s3_bucket(bucket_name, region, acct, logging_bucket):
+def handle_s3_bucket(bucket_name, logging_bucket):
+    result = []
     # bucket_name is the resource name
     s3_client = boto3.client("s3")
     target_prefix = f"{bucket_name}/"
 
     try:
+        # Check for circular recursive logging scenarios
+        if bucket_name == logging_bucket:
+            return add_response(
+                "server_access_logging",
+                f"same_bucket_check: {bucket_name} is a logging bucket and cannot log to itself!",
+                True,  # Flag the suppression request
+            )
+
+        # Get tags of the source bucket
+        try:
+            response = s3_client.get_bucket_tagging(Bucket=bucket_name)
+            tags = response.get("TagSet", [])
+            # Look for a tag of exemptLoggingBucket=True
+            for tag in tags:
+                if tag["Key"] == "exemptLoggingBucket" and tag["Value"] == "True":
+                    return add_response(
+                        "server_access_logging",
+                        f"exemptLoggingBucket_check: {bucket_name} is exempt from logging!",
+                        True,  # Flag the suppression request
+                    )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchTagSet":
+                # No tags on the bucket, continue with logging setup
+                pass
+            else:
+                # Re-raise other ClientError exceptions
+                raise
+
         # Check if source bucket exists
         s3_client.head_bucket(Bucket=bucket_name)
 
-        # Check for circular logging scenarios
-        if bucket_name == logging_bucket or "s3-access-logs" in bucket_name:
-            return {
-                "output": {
-                    "message": "This bucket is exempt from logging as it would create a circular log effect",
-                    "resourceBucketName": bucket_name,
-                    "LoggingBucketName": logging_bucket,
-                    "LoggingPrefix": target_prefix,
-                    "status": "SUPPRESSED",
-                }
-            }
+        # Check if destination bucket exists
+        s3_client.head_bucket(Bucket=logging_bucket)
 
         # Enable access logging
         s3_client.put_bucket_logging(
@@ -2412,48 +2440,37 @@ def handle_s3_bucket(bucket_name, region, acct, logging_bucket):
             },
         )
 
-        return {
-            "output": {
-                "message": "Server Access Logging Successfully Set.",
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "RESOLVED",
-            }
-        }
+        result.append(
+            add_response(
+                "server_access_logging",
+                f"Bucket {bucket_name} is logging to {logging_bucket}",
+            )
+        )
     except s3_client.exceptions.NoSuchBucket:
-        return {
-            "output": {
-                "message": "One of the buckets doesnt exist",
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "FAILED",
-            }
-        }
+        return add_error(
+            "server_access_logging",
+            f"bucket_exists_check: {bucket_name} or {logging_bucket} doesnt exist!",
+        )
     except Exception as e:
-        return {
-            "output": {
-                "message": str(e),
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "FAILED",
-            }
-        }
+        return add_error(
+            "server_access_logging",
+            f"{e.response['Error']['Code']}: {bucket_name} or {logging_bucket} doesnt exist!",
+        )
+
+    return result[0] if result else add_error("unknown", "No result generated")
 
 
 # For local testing
 if __name__ == "__main__":
     # Example event for testing
     test_event = {
-        "ResourceId": "asr-test-bucket-kpp-2",
+        "ResourceId": "cnxc-s3-server-access-logging-211125410042-us-east-1",
         "Region": "us-east-1",
         "AccountId": "211125410042",
         "ResourceType": "AwsS3Bucket",
         "LoggingBucket": "cnxc-s3-server-access-logging-211125410042-us-east-1",
     }
-    print(runbook_handler((test_event), None))",
+    print(json.dumps(runbook_handler((test_event), None), indent=4))",
               },
               "isEnd": true,
               "name": "Remediation",
@@ -2520,8 +2537,10 @@ Enables appropriate Generic Logging:
 
 ## Input Parameters
 * AutomationAssumeRole: (Required) The Amazon Resource Name (ARN) of the AWS Identity and Access Management (IAM) role that allows Systems Manager Automation to perform the actions on your behalf.
-* ResourceId: (Required) The Resource ID
-* ResourceType: (Required) Resource Type
+* ResourceId:           (Required) The Resource ID
+* ResourceType:         (Required) Resource Type
+* AccountId:            (Required) AWS Account #
+* Region:               (Required) AWS Region
 
 ## Output Parameters
 * Remediation.Output: STDOUT and messages from the remediation steps.
@@ -3065,9 +3084,9 @@ from botocore.exceptions import ClientError
 responses = {"EnableLogging": []}
 
 
-def add_response(action, message):
+def add_response(action, message, suppress=False):
     """Helper to create response objects."""
-    return {"Action": action, "Message": message}
+    return {"Action": action, "Suppress": suppress, "Message": message}
 
 
 def add_error(action, error_msg):
@@ -3110,115 +3129,122 @@ def createLogGroup(name, region, acct):
 
 def runbook_handler(event, context):
     """Handles AWS Config remediation runbook for enabling logging."""
-    try:
-        # Validate required fields
-        if "ResourceId" not in event:
-            raise ValueError("Missing required input: ResourceId")
 
-        if "ResourceType" not in event:
-            raise ValueError("Missing required input: ResourceId")
+    # Validate required fields
+    if "ResourceId" not in event:
+        raise ValueError("Missing required input: ResourceId")
 
-        res_type = event["ResourceType"]
+    if "ResourceType" not in event:
+        raise ValueError("Missing required input: ResourceType")
 
-        if res_type == "AwsS3Bucket":
-            res_id = event["ResourceId"]
-            svc_name = "s3"
-        else:
-            res_id = event["ResourceId"]
-            res_split = res_id.split(":")
-            svc_name = res_split[2]
+    res_type = event["ResourceType"]
 
-        res_type_map = {
-            "elasticloadbalancing": "AwsElbv2LoadBalancer",
-            "elb": "AwsElbv2LoadBalancer",
-            "apigateway": "AwsApiGatewayStage",
-            "execute-api": "AwsApiGatewayV2Stage",
-            "states": "AwsStepFunctionsStateMachine",
-            "cloudfront": "AwsCloudFrontDistribution",
-            "s3": "AwsS3Bucket",
-        }
-        res_type = res_type_map.get(svc_name, f"Unknown:{svc_name}")
+    if res_type == "AwsS3Bucket":
+        res_id = event["ResourceId"]
+        svc_name = "s3"
+    else:
+        res_id = event["ResourceId"]
+        res_split = res_id.split(":")
+        svc_name = res_split[2]
 
-        # Extract account ID
-        if "AccountId" in event and event["AccountId"]:
-            acct_id = event["AccountId"]
+    res_type_map = {
+        "elasticloadbalancing": "AwsElbv2LoadBalancer",
+        "elb": "AwsElbv2LoadBalancer",
+        "apigateway": "AwsApiGatewayStage",
+        "execute-api": "AwsApiGatewayV2Stage",
+        "states": "AwsStepFunctionsStateMachine",
+        "cloudfront": "AwsCloudFrontDistribution",
+        "s3": "AwsS3Bucket",
+    }
+    res_type = res_type_map.get(svc_name, "Unknown")
+
+    if res_type == "Unknown":
+        raise ValueError(f"Unknown resource type: {svc_name}")
+
+    # Extract account ID
+    if "AccountId" in event and event["AccountId"]:
+        acct_id = event["AccountId"]
+    else:
+        try:
+            acct_id = res_split[4]
+            if not acct_id or not acct_id.isdigit():
+                raise ValueError("Invalid account ID in resource ARN")
+        except (IndexError, ValueError) as e:
+            raise ValueError(f"Unable to extract valid account ID: {str(e)}")
+
+    # Determine region
+    if "Region" in event and event["Region"]:
+        region = event["Region"]
+    else:
+        if svc_name == "cloudfront" or "AwsCloudFrontDistribution" in event.get(
+            "ResourceType", ""
+        ):
+            region = "us-east-1"
         else:
             try:
-                acct_id = res_split[4]
-                if not acct_id or not acct_id.isdigit():
-                    raise ValueError("Invalid account ID in resource ARN")
-            except (IndexError, ValueError) as e:
-                raise ValueError(f"Unable to extract valid account ID: {str(e)}")
-
-        # Determine region
-        if "Region" in event and event["Region"]:
-            region = event["Region"]
-        else:
-            if svc_name == "cloudfront" or "AwsCloudFrontDistribution" in event.get(
-                "ResourceType", ""
-            ):
+                region = res_split[3] or "us-east-1"
+            except (IndexError, TypeError):
                 region = "us-east-1"
-            else:
-                try:
-                    region = res_split[3] or "us-east-1"
-                except (IndexError, TypeError):
-                    region = "us-east-1"
 
-        # Convert elasticloadbalancing to elb for consistency
-        if svc_name == "elasticloadbalancing":
-            svc_name = "elb"
+    # Convert elasticloadbalancing to elb for consistency
+    if svc_name == "elasticloadbalancing":
+        svc_name = "elb"
 
-        logging_bucket = event["LoggingBucket"]
+    logging_bucket = event["LoggingBucket"]
 
-        # Log the extracted information
-        print(f"[INFO] Using account ID: {acct_id} for resource: {res_id}")
-        print(f"[INFO] Using region: {region} for resource: {res_id}")
-        print(f"[INFO] Using resource type: {res_type} for resource: {res_id}")
-        print(f"[INFO] Using logging bucket: {logging_bucket} for resource: {res_id}")
-
-        # Map resource types to handlers
-        handlers = {
-            "AwsElbv2LoadBalancer": lambda: handle_elbv2(
-                res_id, region, svc_name, acct_id
-            ),
-            "AwsApiGatewayStage": lambda: handle_api_gateway_stage(
-                res_split, region, acct_id
-            ),
-            "AwsStepFunctionsStateMachine": lambda: handle_step_functions(
-                res_split, res_id, region, acct_id
-            ),
-            "AwsApiGatewayV2Stage": lambda: handle_api_gateway_v2_stage(
-                res_split, region, acct_id
-            ),
-            "AwsCloudFrontDistribution": lambda: handle_cloudfront_distribution(
-                res_split, region, acct_id, logging_bucket
-            ),
-            "AwsS3Bucket": lambda: handle_s3_bucket(
-                res_id, region, acct_id, logging_bucket
-            ),
-        }
-
-        # Execute appropriate handler
-        if res_type in handlers:
-            responses["EnableLogging"].append(handlers[res_type]())
-        else:
-            responses["EnableLogging"].append(
-                add_response(
-                    "ResourceTypeValidation", f"Unsupported resource type: {res_type}"
-                )
-            )
-
-        return {"output": "EnableLogging", "http_responses": responses}
-
-    except ValueError as ve:
-        return create_error_response("ValidationError", str(ve))
-    except ClientError as ce:
-        return create_error_response(
-            "AWSError",
-            f"AWS API Error: {ce.response['Error']['Code']} - {ce.response['Error']['Message']}",
+    # Log the extracted information
+    responses["EnableLogging"].append(
+        add_response("INFO", f"Using account ID: {acct_id} for resource: {res_id}")
+    )
+    responses["EnableLogging"].append(
+        add_response("INFO", f"Using region: {region} for resource: {res_id}")
+    )
+    responses["EnableLogging"].append(
+        add_response(
+            "INFO", f"Using logging bucket: {logging_bucket} for resource: {res_id}"
         )
-    except Exception as e:
-        return create_error_response("UnexpectedError", f"Unexpected error: {str(e)}")
+    )
+
+    # Map resource types to handlers
+    handlers = {
+        "AwsElbv2LoadBalancer": lambda: handle_elbv2(res_id, region, svc_name, acct_id),
+        "AwsApiGatewayStage": lambda: handle_api_gateway_stage(
+            res_split, region, acct_id
+        ),
+        "AwsStepFunctionsStateMachine": lambda: handle_step_functions(
+            res_split, res_id, region, acct_id
+        ),
+        "AwsApiGatewayV2Stage": lambda: handle_api_gateway_v2_stage(
+            res_split, region, acct_id
+        ),
+        "AwsCloudFrontDistribution": lambda: handle_cloudfront_distribution(
+            res_split, region, acct_id, logging_bucket
+        ),
+        "AwsS3Bucket": lambda: handle_s3_bucket(res_id, logging_bucket),
+    }
+
+    # Execute appropriate handler
+    if res_type in handlers:
+        responses["EnableLogging"].append(handlers[res_type]())
+    else:
+        responses["EnableLogging"].append(
+            add_response(
+                "ResourceTypeValidation", f"Unsupported resource type: {res_type}"
+            )
+        )
+
+    # Overall we will assume that the overall status is not to be suppressed unless indicated
+    # by the handler functions
+    message = "Requested Generic Logging"
+    for response in responses["EnableLogging"]:
+        if "Message" in response:
+            message = response["Message"]
+
+    return {
+        "status": "Success",
+        "message": message,
+        "details": responses,
+    }
 
 
 def handle_elbv2(res_id, region, svc, acct):
@@ -3249,6 +3275,7 @@ def handle_elbv2(res_id, region, svc, acct):
         )
     except Exception as e:
         return add_error("enable_logging", f"Unexpected error: {str(e)}")
+        raise RuntimeError(str(e))
 
 
 def setupAPIGatewayAccountSettings(acct, client):
@@ -3387,7 +3414,7 @@ def handle_api_gateway_stage(res_split, region, acct):
 
     except Exception as e:
         result.append(
-            add_error("enable_logging", f"Failed to configure API Gateway: {str(e)}")
+            add_error("update_stage", f"Failed to configure API Gateway: {str(e)}")
         )
 
     return result[0] if result else add_error("unknown", "No result generated")
@@ -3670,26 +3697,46 @@ def handle_cloudfront_distribution(res_split, region, acct, logging_bucket):
     return result[0] if result else add_error("unknown", "No result generated")
 
 
-def handle_s3_bucket(bucket_name, region, acct, logging_bucket):
+def handle_s3_bucket(bucket_name, logging_bucket):
+    result = []
     # bucket_name is the resource name
     s3_client = boto3.client("s3")
     target_prefix = f"{bucket_name}/"
 
     try:
+        # Check for circular recursive logging scenarios
+        if bucket_name == logging_bucket:
+            return add_response(
+                "server_access_logging",
+                f"same_bucket_check: {bucket_name} is a logging bucket and cannot log to itself!",
+                True,  # Flag the suppression request
+            )
+
+        # Get tags of the source bucket
+        try:
+            response = s3_client.get_bucket_tagging(Bucket=bucket_name)
+            tags = response.get("TagSet", [])
+            # Look for a tag of exemptLoggingBucket=True
+            for tag in tags:
+                if tag["Key"] == "exemptLoggingBucket" and tag["Value"] == "True":
+                    return add_response(
+                        "server_access_logging",
+                        f"exemptLoggingBucket_check: {bucket_name} is exempt from logging!",
+                        True,  # Flag the suppression request
+                    )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchTagSet":
+                # No tags on the bucket, continue with logging setup
+                pass
+            else:
+                # Re-raise other ClientError exceptions
+                raise
+
         # Check if source bucket exists
         s3_client.head_bucket(Bucket=bucket_name)
 
-        # Check for circular logging scenarios
-        if bucket_name == logging_bucket or "s3-access-logs" in bucket_name:
-            return {
-                "output": {
-                    "message": "This bucket is exempt from logging as it would create a circular log effect",
-                    "resourceBucketName": bucket_name,
-                    "LoggingBucketName": logging_bucket,
-                    "LoggingPrefix": target_prefix,
-                    "status": "SUPPRESSED",
-                }
-            }
+        # Check if destination bucket exists
+        s3_client.head_bucket(Bucket=logging_bucket)
 
         # Enable access logging
         s3_client.put_bucket_logging(
@@ -3705,48 +3752,37 @@ def handle_s3_bucket(bucket_name, region, acct, logging_bucket):
             },
         )
 
-        return {
-            "output": {
-                "message": "Server Access Logging Successfully Set.",
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "RESOLVED",
-            }
-        }
+        result.append(
+            add_response(
+                "server_access_logging",
+                f"Bucket {bucket_name} is logging to {logging_bucket}",
+            )
+        )
     except s3_client.exceptions.NoSuchBucket:
-        return {
-            "output": {
-                "message": "One of the buckets doesnt exist",
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "FAILED",
-            }
-        }
+        return add_error(
+            "server_access_logging",
+            f"bucket_exists_check: {bucket_name} or {logging_bucket} doesnt exist!",
+        )
     except Exception as e:
-        return {
-            "output": {
-                "message": str(e),
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "FAILED",
-            }
-        }
+        return add_error(
+            "server_access_logging",
+            f"{e.response['Error']['Code']}: {bucket_name} or {logging_bucket} doesnt exist!",
+        )
+
+    return result[0] if result else add_error("unknown", "No result generated")
 
 
 # For local testing
 if __name__ == "__main__":
     # Example event for testing
     test_event = {
-        "ResourceId": "asr-test-bucket-kpp-2",
+        "ResourceId": "cnxc-s3-server-access-logging-211125410042-us-east-1",
         "Region": "us-east-1",
         "AccountId": "211125410042",
         "ResourceType": "AwsS3Bucket",
         "LoggingBucket": "cnxc-s3-server-access-logging-211125410042-us-east-1",
     }
-    print(runbook_handler((test_event), None))",
+    print(json.dumps(runbook_handler((test_event), None), indent=4))",
               },
               "isEnd": true,
               "name": "Remediation",
@@ -4358,9 +4394,9 @@ from botocore.exceptions import ClientError
 responses = {"EnableLogging": []}
 
 
-def add_response(action, message):
+def add_response(action, message, suppress=False):
     """Helper to create response objects."""
-    return {"Action": action, "Message": message}
+    return {"Action": action, "Suppress": suppress, "Message": message}
 
 
 def add_error(action, error_msg):
@@ -4403,115 +4439,122 @@ def createLogGroup(name, region, acct):
 
 def runbook_handler(event, context):
     """Handles AWS Config remediation runbook for enabling logging."""
-    try:
-        # Validate required fields
-        if "ResourceId" not in event:
-            raise ValueError("Missing required input: ResourceId")
 
-        if "ResourceType" not in event:
-            raise ValueError("Missing required input: ResourceId")
+    # Validate required fields
+    if "ResourceId" not in event:
+        raise ValueError("Missing required input: ResourceId")
 
-        res_type = event["ResourceType"]
+    if "ResourceType" not in event:
+        raise ValueError("Missing required input: ResourceType")
 
-        if res_type == "AwsS3Bucket":
-            res_id = event["ResourceId"]
-            svc_name = "s3"
-        else:
-            res_id = event["ResourceId"]
-            res_split = res_id.split(":")
-            svc_name = res_split[2]
+    res_type = event["ResourceType"]
 
-        res_type_map = {
-            "elasticloadbalancing": "AwsElbv2LoadBalancer",
-            "elb": "AwsElbv2LoadBalancer",
-            "apigateway": "AwsApiGatewayStage",
-            "execute-api": "AwsApiGatewayV2Stage",
-            "states": "AwsStepFunctionsStateMachine",
-            "cloudfront": "AwsCloudFrontDistribution",
-            "s3": "AwsS3Bucket",
-        }
-        res_type = res_type_map.get(svc_name, f"Unknown:{svc_name}")
+    if res_type == "AwsS3Bucket":
+        res_id = event["ResourceId"]
+        svc_name = "s3"
+    else:
+        res_id = event["ResourceId"]
+        res_split = res_id.split(":")
+        svc_name = res_split[2]
 
-        # Extract account ID
-        if "AccountId" in event and event["AccountId"]:
-            acct_id = event["AccountId"]
+    res_type_map = {
+        "elasticloadbalancing": "AwsElbv2LoadBalancer",
+        "elb": "AwsElbv2LoadBalancer",
+        "apigateway": "AwsApiGatewayStage",
+        "execute-api": "AwsApiGatewayV2Stage",
+        "states": "AwsStepFunctionsStateMachine",
+        "cloudfront": "AwsCloudFrontDistribution",
+        "s3": "AwsS3Bucket",
+    }
+    res_type = res_type_map.get(svc_name, "Unknown")
+
+    if res_type == "Unknown":
+        raise ValueError(f"Unknown resource type: {svc_name}")
+
+    # Extract account ID
+    if "AccountId" in event and event["AccountId"]:
+        acct_id = event["AccountId"]
+    else:
+        try:
+            acct_id = res_split[4]
+            if not acct_id or not acct_id.isdigit():
+                raise ValueError("Invalid account ID in resource ARN")
+        except (IndexError, ValueError) as e:
+            raise ValueError(f"Unable to extract valid account ID: {str(e)}")
+
+    # Determine region
+    if "Region" in event and event["Region"]:
+        region = event["Region"]
+    else:
+        if svc_name == "cloudfront" or "AwsCloudFrontDistribution" in event.get(
+            "ResourceType", ""
+        ):
+            region = "us-east-1"
         else:
             try:
-                acct_id = res_split[4]
-                if not acct_id or not acct_id.isdigit():
-                    raise ValueError("Invalid account ID in resource ARN")
-            except (IndexError, ValueError) as e:
-                raise ValueError(f"Unable to extract valid account ID: {str(e)}")
-
-        # Determine region
-        if "Region" in event and event["Region"]:
-            region = event["Region"]
-        else:
-            if svc_name == "cloudfront" or "AwsCloudFrontDistribution" in event.get(
-                "ResourceType", ""
-            ):
+                region = res_split[3] or "us-east-1"
+            except (IndexError, TypeError):
                 region = "us-east-1"
-            else:
-                try:
-                    region = res_split[3] or "us-east-1"
-                except (IndexError, TypeError):
-                    region = "us-east-1"
 
-        # Convert elasticloadbalancing to elb for consistency
-        if svc_name == "elasticloadbalancing":
-            svc_name = "elb"
+    # Convert elasticloadbalancing to elb for consistency
+    if svc_name == "elasticloadbalancing":
+        svc_name = "elb"
 
-        logging_bucket = event["LoggingBucket"]
+    logging_bucket = event["LoggingBucket"]
 
-        # Log the extracted information
-        print(f"[INFO] Using account ID: {acct_id} for resource: {res_id}")
-        print(f"[INFO] Using region: {region} for resource: {res_id}")
-        print(f"[INFO] Using resource type: {res_type} for resource: {res_id}")
-        print(f"[INFO] Using logging bucket: {logging_bucket} for resource: {res_id}")
-
-        # Map resource types to handlers
-        handlers = {
-            "AwsElbv2LoadBalancer": lambda: handle_elbv2(
-                res_id, region, svc_name, acct_id
-            ),
-            "AwsApiGatewayStage": lambda: handle_api_gateway_stage(
-                res_split, region, acct_id
-            ),
-            "AwsStepFunctionsStateMachine": lambda: handle_step_functions(
-                res_split, res_id, region, acct_id
-            ),
-            "AwsApiGatewayV2Stage": lambda: handle_api_gateway_v2_stage(
-                res_split, region, acct_id
-            ),
-            "AwsCloudFrontDistribution": lambda: handle_cloudfront_distribution(
-                res_split, region, acct_id, logging_bucket
-            ),
-            "AwsS3Bucket": lambda: handle_s3_bucket(
-                res_id, region, acct_id, logging_bucket
-            ),
-        }
-
-        # Execute appropriate handler
-        if res_type in handlers:
-            responses["EnableLogging"].append(handlers[res_type]())
-        else:
-            responses["EnableLogging"].append(
-                add_response(
-                    "ResourceTypeValidation", f"Unsupported resource type: {res_type}"
-                )
-            )
-
-        return {"output": "EnableLogging", "http_responses": responses}
-
-    except ValueError as ve:
-        return create_error_response("ValidationError", str(ve))
-    except ClientError as ce:
-        return create_error_response(
-            "AWSError",
-            f"AWS API Error: {ce.response['Error']['Code']} - {ce.response['Error']['Message']}",
+    # Log the extracted information
+    responses["EnableLogging"].append(
+        add_response("INFO", f"Using account ID: {acct_id} for resource: {res_id}")
+    )
+    responses["EnableLogging"].append(
+        add_response("INFO", f"Using region: {region} for resource: {res_id}")
+    )
+    responses["EnableLogging"].append(
+        add_response(
+            "INFO", f"Using logging bucket: {logging_bucket} for resource: {res_id}"
         )
-    except Exception as e:
-        return create_error_response("UnexpectedError", f"Unexpected error: {str(e)}")
+    )
+
+    # Map resource types to handlers
+    handlers = {
+        "AwsElbv2LoadBalancer": lambda: handle_elbv2(res_id, region, svc_name, acct_id),
+        "AwsApiGatewayStage": lambda: handle_api_gateway_stage(
+            res_split, region, acct_id
+        ),
+        "AwsStepFunctionsStateMachine": lambda: handle_step_functions(
+            res_split, res_id, region, acct_id
+        ),
+        "AwsApiGatewayV2Stage": lambda: handle_api_gateway_v2_stage(
+            res_split, region, acct_id
+        ),
+        "AwsCloudFrontDistribution": lambda: handle_cloudfront_distribution(
+            res_split, region, acct_id, logging_bucket
+        ),
+        "AwsS3Bucket": lambda: handle_s3_bucket(res_id, logging_bucket),
+    }
+
+    # Execute appropriate handler
+    if res_type in handlers:
+        responses["EnableLogging"].append(handlers[res_type]())
+    else:
+        responses["EnableLogging"].append(
+            add_response(
+                "ResourceTypeValidation", f"Unsupported resource type: {res_type}"
+            )
+        )
+
+    # Overall we will assume that the overall status is not to be suppressed unless indicated
+    # by the handler functions
+    message = "Requested Generic Logging"
+    for response in responses["EnableLogging"]:
+        if "Message" in response:
+            message = response["Message"]
+
+    return {
+        "status": "Success",
+        "message": message,
+        "details": responses,
+    }
 
 
 def handle_elbv2(res_id, region, svc, acct):
@@ -4542,6 +4585,7 @@ def handle_elbv2(res_id, region, svc, acct):
         )
     except Exception as e:
         return add_error("enable_logging", f"Unexpected error: {str(e)}")
+        raise RuntimeError(str(e))
 
 
 def setupAPIGatewayAccountSettings(acct, client):
@@ -4680,7 +4724,7 @@ def handle_api_gateway_stage(res_split, region, acct):
 
     except Exception as e:
         result.append(
-            add_error("enable_logging", f"Failed to configure API Gateway: {str(e)}")
+            add_error("update_stage", f"Failed to configure API Gateway: {str(e)}")
         )
 
     return result[0] if result else add_error("unknown", "No result generated")
@@ -4963,26 +5007,46 @@ def handle_cloudfront_distribution(res_split, region, acct, logging_bucket):
     return result[0] if result else add_error("unknown", "No result generated")
 
 
-def handle_s3_bucket(bucket_name, region, acct, logging_bucket):
+def handle_s3_bucket(bucket_name, logging_bucket):
+    result = []
     # bucket_name is the resource name
     s3_client = boto3.client("s3")
     target_prefix = f"{bucket_name}/"
 
     try:
+        # Check for circular recursive logging scenarios
+        if bucket_name == logging_bucket:
+            return add_response(
+                "server_access_logging",
+                f"same_bucket_check: {bucket_name} is a logging bucket and cannot log to itself!",
+                True,  # Flag the suppression request
+            )
+
+        # Get tags of the source bucket
+        try:
+            response = s3_client.get_bucket_tagging(Bucket=bucket_name)
+            tags = response.get("TagSet", [])
+            # Look for a tag of exemptLoggingBucket=True
+            for tag in tags:
+                if tag["Key"] == "exemptLoggingBucket" and tag["Value"] == "True":
+                    return add_response(
+                        "server_access_logging",
+                        f"exemptLoggingBucket_check: {bucket_name} is exempt from logging!",
+                        True,  # Flag the suppression request
+                    )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchTagSet":
+                # No tags on the bucket, continue with logging setup
+                pass
+            else:
+                # Re-raise other ClientError exceptions
+                raise
+
         # Check if source bucket exists
         s3_client.head_bucket(Bucket=bucket_name)
 
-        # Check for circular logging scenarios
-        if bucket_name == logging_bucket or "s3-access-logs" in bucket_name:
-            return {
-                "output": {
-                    "message": "This bucket is exempt from logging as it would create a circular log effect",
-                    "resourceBucketName": bucket_name,
-                    "LoggingBucketName": logging_bucket,
-                    "LoggingPrefix": target_prefix,
-                    "status": "SUPPRESSED",
-                }
-            }
+        # Check if destination bucket exists
+        s3_client.head_bucket(Bucket=logging_bucket)
 
         # Enable access logging
         s3_client.put_bucket_logging(
@@ -4998,48 +5062,37 @@ def handle_s3_bucket(bucket_name, region, acct, logging_bucket):
             },
         )
 
-        return {
-            "output": {
-                "message": "Server Access Logging Successfully Set.",
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "RESOLVED",
-            }
-        }
+        result.append(
+            add_response(
+                "server_access_logging",
+                f"Bucket {bucket_name} is logging to {logging_bucket}",
+            )
+        )
     except s3_client.exceptions.NoSuchBucket:
-        return {
-            "output": {
-                "message": "One of the buckets doesnt exist",
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "FAILED",
-            }
-        }
+        return add_error(
+            "server_access_logging",
+            f"bucket_exists_check: {bucket_name} or {logging_bucket} doesnt exist!",
+        )
     except Exception as e:
-        return {
-            "output": {
-                "message": str(e),
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "FAILED",
-            }
-        }
+        return add_error(
+            "server_access_logging",
+            f"{e.response['Error']['Code']}: {bucket_name} or {logging_bucket} doesnt exist!",
+        )
+
+    return result[0] if result else add_error("unknown", "No result generated")
 
 
 # For local testing
 if __name__ == "__main__":
     # Example event for testing
     test_event = {
-        "ResourceId": "asr-test-bucket-kpp-2",
+        "ResourceId": "cnxc-s3-server-access-logging-211125410042-us-east-1",
         "Region": "us-east-1",
         "AccountId": "211125410042",
         "ResourceType": "AwsS3Bucket",
         "LoggingBucket": "cnxc-s3-server-access-logging-211125410042-us-east-1",
     }
-    print(runbook_handler((test_event), None))",
+    print(json.dumps(runbook_handler((test_event), None), indent=4))",
               },
               "isEnd": true,
               "name": "Remediation",
@@ -5907,9 +5960,9 @@ from botocore.exceptions import ClientError
 responses = {"EnableLogging": []}
 
 
-def add_response(action, message):
+def add_response(action, message, suppress=False):
     """Helper to create response objects."""
-    return {"Action": action, "Message": message}
+    return {"Action": action, "Suppress": suppress, "Message": message}
 
 
 def add_error(action, error_msg):
@@ -5952,115 +6005,122 @@ def createLogGroup(name, region, acct):
 
 def runbook_handler(event, context):
     """Handles AWS Config remediation runbook for enabling logging."""
-    try:
-        # Validate required fields
-        if "ResourceId" not in event:
-            raise ValueError("Missing required input: ResourceId")
 
-        if "ResourceType" not in event:
-            raise ValueError("Missing required input: ResourceId")
+    # Validate required fields
+    if "ResourceId" not in event:
+        raise ValueError("Missing required input: ResourceId")
 
-        res_type = event["ResourceType"]
+    if "ResourceType" not in event:
+        raise ValueError("Missing required input: ResourceType")
 
-        if res_type == "AwsS3Bucket":
-            res_id = event["ResourceId"]
-            svc_name = "s3"
-        else:
-            res_id = event["ResourceId"]
-            res_split = res_id.split(":")
-            svc_name = res_split[2]
+    res_type = event["ResourceType"]
 
-        res_type_map = {
-            "elasticloadbalancing": "AwsElbv2LoadBalancer",
-            "elb": "AwsElbv2LoadBalancer",
-            "apigateway": "AwsApiGatewayStage",
-            "execute-api": "AwsApiGatewayV2Stage",
-            "states": "AwsStepFunctionsStateMachine",
-            "cloudfront": "AwsCloudFrontDistribution",
-            "s3": "AwsS3Bucket",
-        }
-        res_type = res_type_map.get(svc_name, f"Unknown:{svc_name}")
+    if res_type == "AwsS3Bucket":
+        res_id = event["ResourceId"]
+        svc_name = "s3"
+    else:
+        res_id = event["ResourceId"]
+        res_split = res_id.split(":")
+        svc_name = res_split[2]
 
-        # Extract account ID
-        if "AccountId" in event and event["AccountId"]:
-            acct_id = event["AccountId"]
+    res_type_map = {
+        "elasticloadbalancing": "AwsElbv2LoadBalancer",
+        "elb": "AwsElbv2LoadBalancer",
+        "apigateway": "AwsApiGatewayStage",
+        "execute-api": "AwsApiGatewayV2Stage",
+        "states": "AwsStepFunctionsStateMachine",
+        "cloudfront": "AwsCloudFrontDistribution",
+        "s3": "AwsS3Bucket",
+    }
+    res_type = res_type_map.get(svc_name, "Unknown")
+
+    if res_type == "Unknown":
+        raise ValueError(f"Unknown resource type: {svc_name}")
+
+    # Extract account ID
+    if "AccountId" in event and event["AccountId"]:
+        acct_id = event["AccountId"]
+    else:
+        try:
+            acct_id = res_split[4]
+            if not acct_id or not acct_id.isdigit():
+                raise ValueError("Invalid account ID in resource ARN")
+        except (IndexError, ValueError) as e:
+            raise ValueError(f"Unable to extract valid account ID: {str(e)}")
+
+    # Determine region
+    if "Region" in event and event["Region"]:
+        region = event["Region"]
+    else:
+        if svc_name == "cloudfront" or "AwsCloudFrontDistribution" in event.get(
+            "ResourceType", ""
+        ):
+            region = "us-east-1"
         else:
             try:
-                acct_id = res_split[4]
-                if not acct_id or not acct_id.isdigit():
-                    raise ValueError("Invalid account ID in resource ARN")
-            except (IndexError, ValueError) as e:
-                raise ValueError(f"Unable to extract valid account ID: {str(e)}")
-
-        # Determine region
-        if "Region" in event and event["Region"]:
-            region = event["Region"]
-        else:
-            if svc_name == "cloudfront" or "AwsCloudFrontDistribution" in event.get(
-                "ResourceType", ""
-            ):
+                region = res_split[3] or "us-east-1"
+            except (IndexError, TypeError):
                 region = "us-east-1"
-            else:
-                try:
-                    region = res_split[3] or "us-east-1"
-                except (IndexError, TypeError):
-                    region = "us-east-1"
 
-        # Convert elasticloadbalancing to elb for consistency
-        if svc_name == "elasticloadbalancing":
-            svc_name = "elb"
+    # Convert elasticloadbalancing to elb for consistency
+    if svc_name == "elasticloadbalancing":
+        svc_name = "elb"
 
-        logging_bucket = event["LoggingBucket"]
+    logging_bucket = event["LoggingBucket"]
 
-        # Log the extracted information
-        print(f"[INFO] Using account ID: {acct_id} for resource: {res_id}")
-        print(f"[INFO] Using region: {region} for resource: {res_id}")
-        print(f"[INFO] Using resource type: {res_type} for resource: {res_id}")
-        print(f"[INFO] Using logging bucket: {logging_bucket} for resource: {res_id}")
-
-        # Map resource types to handlers
-        handlers = {
-            "AwsElbv2LoadBalancer": lambda: handle_elbv2(
-                res_id, region, svc_name, acct_id
-            ),
-            "AwsApiGatewayStage": lambda: handle_api_gateway_stage(
-                res_split, region, acct_id
-            ),
-            "AwsStepFunctionsStateMachine": lambda: handle_step_functions(
-                res_split, res_id, region, acct_id
-            ),
-            "AwsApiGatewayV2Stage": lambda: handle_api_gateway_v2_stage(
-                res_split, region, acct_id
-            ),
-            "AwsCloudFrontDistribution": lambda: handle_cloudfront_distribution(
-                res_split, region, acct_id, logging_bucket
-            ),
-            "AwsS3Bucket": lambda: handle_s3_bucket(
-                res_id, region, acct_id, logging_bucket
-            ),
-        }
-
-        # Execute appropriate handler
-        if res_type in handlers:
-            responses["EnableLogging"].append(handlers[res_type]())
-        else:
-            responses["EnableLogging"].append(
-                add_response(
-                    "ResourceTypeValidation", f"Unsupported resource type: {res_type}"
-                )
-            )
-
-        return {"output": "EnableLogging", "http_responses": responses}
-
-    except ValueError as ve:
-        return create_error_response("ValidationError", str(ve))
-    except ClientError as ce:
-        return create_error_response(
-            "AWSError",
-            f"AWS API Error: {ce.response['Error']['Code']} - {ce.response['Error']['Message']}",
+    # Log the extracted information
+    responses["EnableLogging"].append(
+        add_response("INFO", f"Using account ID: {acct_id} for resource: {res_id}")
+    )
+    responses["EnableLogging"].append(
+        add_response("INFO", f"Using region: {region} for resource: {res_id}")
+    )
+    responses["EnableLogging"].append(
+        add_response(
+            "INFO", f"Using logging bucket: {logging_bucket} for resource: {res_id}"
         )
-    except Exception as e:
-        return create_error_response("UnexpectedError", f"Unexpected error: {str(e)}")
+    )
+
+    # Map resource types to handlers
+    handlers = {
+        "AwsElbv2LoadBalancer": lambda: handle_elbv2(res_id, region, svc_name, acct_id),
+        "AwsApiGatewayStage": lambda: handle_api_gateway_stage(
+            res_split, region, acct_id
+        ),
+        "AwsStepFunctionsStateMachine": lambda: handle_step_functions(
+            res_split, res_id, region, acct_id
+        ),
+        "AwsApiGatewayV2Stage": lambda: handle_api_gateway_v2_stage(
+            res_split, region, acct_id
+        ),
+        "AwsCloudFrontDistribution": lambda: handle_cloudfront_distribution(
+            res_split, region, acct_id, logging_bucket
+        ),
+        "AwsS3Bucket": lambda: handle_s3_bucket(res_id, logging_bucket),
+    }
+
+    # Execute appropriate handler
+    if res_type in handlers:
+        responses["EnableLogging"].append(handlers[res_type]())
+    else:
+        responses["EnableLogging"].append(
+            add_response(
+                "ResourceTypeValidation", f"Unsupported resource type: {res_type}"
+            )
+        )
+
+    # Overall we will assume that the overall status is not to be suppressed unless indicated
+    # by the handler functions
+    message = "Requested Generic Logging"
+    for response in responses["EnableLogging"]:
+        if "Message" in response:
+            message = response["Message"]
+
+    return {
+        "status": "Success",
+        "message": message,
+        "details": responses,
+    }
 
 
 def handle_elbv2(res_id, region, svc, acct):
@@ -6091,6 +6151,7 @@ def handle_elbv2(res_id, region, svc, acct):
         )
     except Exception as e:
         return add_error("enable_logging", f"Unexpected error: {str(e)}")
+        raise RuntimeError(str(e))
 
 
 def setupAPIGatewayAccountSettings(acct, client):
@@ -6229,7 +6290,7 @@ def handle_api_gateway_stage(res_split, region, acct):
 
     except Exception as e:
         result.append(
-            add_error("enable_logging", f"Failed to configure API Gateway: {str(e)}")
+            add_error("update_stage", f"Failed to configure API Gateway: {str(e)}")
         )
 
     return result[0] if result else add_error("unknown", "No result generated")
@@ -6512,26 +6573,46 @@ def handle_cloudfront_distribution(res_split, region, acct, logging_bucket):
     return result[0] if result else add_error("unknown", "No result generated")
 
 
-def handle_s3_bucket(bucket_name, region, acct, logging_bucket):
+def handle_s3_bucket(bucket_name, logging_bucket):
+    result = []
     # bucket_name is the resource name
     s3_client = boto3.client("s3")
     target_prefix = f"{bucket_name}/"
 
     try:
+        # Check for circular recursive logging scenarios
+        if bucket_name == logging_bucket:
+            return add_response(
+                "server_access_logging",
+                f"same_bucket_check: {bucket_name} is a logging bucket and cannot log to itself!",
+                True,  # Flag the suppression request
+            )
+
+        # Get tags of the source bucket
+        try:
+            response = s3_client.get_bucket_tagging(Bucket=bucket_name)
+            tags = response.get("TagSet", [])
+            # Look for a tag of exemptLoggingBucket=True
+            for tag in tags:
+                if tag["Key"] == "exemptLoggingBucket" and tag["Value"] == "True":
+                    return add_response(
+                        "server_access_logging",
+                        f"exemptLoggingBucket_check: {bucket_name} is exempt from logging!",
+                        True,  # Flag the suppression request
+                    )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchTagSet":
+                # No tags on the bucket, continue with logging setup
+                pass
+            else:
+                # Re-raise other ClientError exceptions
+                raise
+
         # Check if source bucket exists
         s3_client.head_bucket(Bucket=bucket_name)
 
-        # Check for circular logging scenarios
-        if bucket_name == logging_bucket or "s3-access-logs" in bucket_name:
-            return {
-                "output": {
-                    "message": "This bucket is exempt from logging as it would create a circular log effect",
-                    "resourceBucketName": bucket_name,
-                    "LoggingBucketName": logging_bucket,
-                    "LoggingPrefix": target_prefix,
-                    "status": "SUPPRESSED",
-                }
-            }
+        # Check if destination bucket exists
+        s3_client.head_bucket(Bucket=logging_bucket)
 
         # Enable access logging
         s3_client.put_bucket_logging(
@@ -6547,48 +6628,37 @@ def handle_s3_bucket(bucket_name, region, acct, logging_bucket):
             },
         )
 
-        return {
-            "output": {
-                "message": "Server Access Logging Successfully Set.",
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "RESOLVED",
-            }
-        }
+        result.append(
+            add_response(
+                "server_access_logging",
+                f"Bucket {bucket_name} is logging to {logging_bucket}",
+            )
+        )
     except s3_client.exceptions.NoSuchBucket:
-        return {
-            "output": {
-                "message": "One of the buckets doesnt exist",
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "FAILED",
-            }
-        }
+        return add_error(
+            "server_access_logging",
+            f"bucket_exists_check: {bucket_name} or {logging_bucket} doesnt exist!",
+        )
     except Exception as e:
-        return {
-            "output": {
-                "message": str(e),
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "FAILED",
-            }
-        }
+        return add_error(
+            "server_access_logging",
+            f"{e.response['Error']['Code']}: {bucket_name} or {logging_bucket} doesnt exist!",
+        )
+
+    return result[0] if result else add_error("unknown", "No result generated")
 
 
 # For local testing
 if __name__ == "__main__":
     # Example event for testing
     test_event = {
-        "ResourceId": "asr-test-bucket-kpp-2",
+        "ResourceId": "cnxc-s3-server-access-logging-211125410042-us-east-1",
         "Region": "us-east-1",
         "AccountId": "211125410042",
         "ResourceType": "AwsS3Bucket",
         "LoggingBucket": "cnxc-s3-server-access-logging-211125410042-us-east-1",
     }
-    print(runbook_handler((test_event), None))",
+    print(json.dumps(runbook_handler((test_event), None), indent=4))",
               },
               "isEnd": true,
               "name": "Remediation",
@@ -7200,9 +7270,9 @@ from botocore.exceptions import ClientError
 responses = {"EnableLogging": []}
 
 
-def add_response(action, message):
+def add_response(action, message, suppress=False):
     """Helper to create response objects."""
-    return {"Action": action, "Message": message}
+    return {"Action": action, "Suppress": suppress, "Message": message}
 
 
 def add_error(action, error_msg):
@@ -7245,115 +7315,122 @@ def createLogGroup(name, region, acct):
 
 def runbook_handler(event, context):
     """Handles AWS Config remediation runbook for enabling logging."""
-    try:
-        # Validate required fields
-        if "ResourceId" not in event:
-            raise ValueError("Missing required input: ResourceId")
 
-        if "ResourceType" not in event:
-            raise ValueError("Missing required input: ResourceId")
+    # Validate required fields
+    if "ResourceId" not in event:
+        raise ValueError("Missing required input: ResourceId")
 
-        res_type = event["ResourceType"]
+    if "ResourceType" not in event:
+        raise ValueError("Missing required input: ResourceType")
 
-        if res_type == "AwsS3Bucket":
-            res_id = event["ResourceId"]
-            svc_name = "s3"
-        else:
-            res_id = event["ResourceId"]
-            res_split = res_id.split(":")
-            svc_name = res_split[2]
+    res_type = event["ResourceType"]
 
-        res_type_map = {
-            "elasticloadbalancing": "AwsElbv2LoadBalancer",
-            "elb": "AwsElbv2LoadBalancer",
-            "apigateway": "AwsApiGatewayStage",
-            "execute-api": "AwsApiGatewayV2Stage",
-            "states": "AwsStepFunctionsStateMachine",
-            "cloudfront": "AwsCloudFrontDistribution",
-            "s3": "AwsS3Bucket",
-        }
-        res_type = res_type_map.get(svc_name, f"Unknown:{svc_name}")
+    if res_type == "AwsS3Bucket":
+        res_id = event["ResourceId"]
+        svc_name = "s3"
+    else:
+        res_id = event["ResourceId"]
+        res_split = res_id.split(":")
+        svc_name = res_split[2]
 
-        # Extract account ID
-        if "AccountId" in event and event["AccountId"]:
-            acct_id = event["AccountId"]
+    res_type_map = {
+        "elasticloadbalancing": "AwsElbv2LoadBalancer",
+        "elb": "AwsElbv2LoadBalancer",
+        "apigateway": "AwsApiGatewayStage",
+        "execute-api": "AwsApiGatewayV2Stage",
+        "states": "AwsStepFunctionsStateMachine",
+        "cloudfront": "AwsCloudFrontDistribution",
+        "s3": "AwsS3Bucket",
+    }
+    res_type = res_type_map.get(svc_name, "Unknown")
+
+    if res_type == "Unknown":
+        raise ValueError(f"Unknown resource type: {svc_name}")
+
+    # Extract account ID
+    if "AccountId" in event and event["AccountId"]:
+        acct_id = event["AccountId"]
+    else:
+        try:
+            acct_id = res_split[4]
+            if not acct_id or not acct_id.isdigit():
+                raise ValueError("Invalid account ID in resource ARN")
+        except (IndexError, ValueError) as e:
+            raise ValueError(f"Unable to extract valid account ID: {str(e)}")
+
+    # Determine region
+    if "Region" in event and event["Region"]:
+        region = event["Region"]
+    else:
+        if svc_name == "cloudfront" or "AwsCloudFrontDistribution" in event.get(
+            "ResourceType", ""
+        ):
+            region = "us-east-1"
         else:
             try:
-                acct_id = res_split[4]
-                if not acct_id or not acct_id.isdigit():
-                    raise ValueError("Invalid account ID in resource ARN")
-            except (IndexError, ValueError) as e:
-                raise ValueError(f"Unable to extract valid account ID: {str(e)}")
-
-        # Determine region
-        if "Region" in event and event["Region"]:
-            region = event["Region"]
-        else:
-            if svc_name == "cloudfront" or "AwsCloudFrontDistribution" in event.get(
-                "ResourceType", ""
-            ):
+                region = res_split[3] or "us-east-1"
+            except (IndexError, TypeError):
                 region = "us-east-1"
-            else:
-                try:
-                    region = res_split[3] or "us-east-1"
-                except (IndexError, TypeError):
-                    region = "us-east-1"
 
-        # Convert elasticloadbalancing to elb for consistency
-        if svc_name == "elasticloadbalancing":
-            svc_name = "elb"
+    # Convert elasticloadbalancing to elb for consistency
+    if svc_name == "elasticloadbalancing":
+        svc_name = "elb"
 
-        logging_bucket = event["LoggingBucket"]
+    logging_bucket = event["LoggingBucket"]
 
-        # Log the extracted information
-        print(f"[INFO] Using account ID: {acct_id} for resource: {res_id}")
-        print(f"[INFO] Using region: {region} for resource: {res_id}")
-        print(f"[INFO] Using resource type: {res_type} for resource: {res_id}")
-        print(f"[INFO] Using logging bucket: {logging_bucket} for resource: {res_id}")
-
-        # Map resource types to handlers
-        handlers = {
-            "AwsElbv2LoadBalancer": lambda: handle_elbv2(
-                res_id, region, svc_name, acct_id
-            ),
-            "AwsApiGatewayStage": lambda: handle_api_gateway_stage(
-                res_split, region, acct_id
-            ),
-            "AwsStepFunctionsStateMachine": lambda: handle_step_functions(
-                res_split, res_id, region, acct_id
-            ),
-            "AwsApiGatewayV2Stage": lambda: handle_api_gateway_v2_stage(
-                res_split, region, acct_id
-            ),
-            "AwsCloudFrontDistribution": lambda: handle_cloudfront_distribution(
-                res_split, region, acct_id, logging_bucket
-            ),
-            "AwsS3Bucket": lambda: handle_s3_bucket(
-                res_id, region, acct_id, logging_bucket
-            ),
-        }
-
-        # Execute appropriate handler
-        if res_type in handlers:
-            responses["EnableLogging"].append(handlers[res_type]())
-        else:
-            responses["EnableLogging"].append(
-                add_response(
-                    "ResourceTypeValidation", f"Unsupported resource type: {res_type}"
-                )
-            )
-
-        return {"output": "EnableLogging", "http_responses": responses}
-
-    except ValueError as ve:
-        return create_error_response("ValidationError", str(ve))
-    except ClientError as ce:
-        return create_error_response(
-            "AWSError",
-            f"AWS API Error: {ce.response['Error']['Code']} - {ce.response['Error']['Message']}",
+    # Log the extracted information
+    responses["EnableLogging"].append(
+        add_response("INFO", f"Using account ID: {acct_id} for resource: {res_id}")
+    )
+    responses["EnableLogging"].append(
+        add_response("INFO", f"Using region: {region} for resource: {res_id}")
+    )
+    responses["EnableLogging"].append(
+        add_response(
+            "INFO", f"Using logging bucket: {logging_bucket} for resource: {res_id}"
         )
-    except Exception as e:
-        return create_error_response("UnexpectedError", f"Unexpected error: {str(e)}")
+    )
+
+    # Map resource types to handlers
+    handlers = {
+        "AwsElbv2LoadBalancer": lambda: handle_elbv2(res_id, region, svc_name, acct_id),
+        "AwsApiGatewayStage": lambda: handle_api_gateway_stage(
+            res_split, region, acct_id
+        ),
+        "AwsStepFunctionsStateMachine": lambda: handle_step_functions(
+            res_split, res_id, region, acct_id
+        ),
+        "AwsApiGatewayV2Stage": lambda: handle_api_gateway_v2_stage(
+            res_split, region, acct_id
+        ),
+        "AwsCloudFrontDistribution": lambda: handle_cloudfront_distribution(
+            res_split, region, acct_id, logging_bucket
+        ),
+        "AwsS3Bucket": lambda: handle_s3_bucket(res_id, logging_bucket),
+    }
+
+    # Execute appropriate handler
+    if res_type in handlers:
+        responses["EnableLogging"].append(handlers[res_type]())
+    else:
+        responses["EnableLogging"].append(
+            add_response(
+                "ResourceTypeValidation", f"Unsupported resource type: {res_type}"
+            )
+        )
+
+    # Overall we will assume that the overall status is not to be suppressed unless indicated
+    # by the handler functions
+    message = "Requested Generic Logging"
+    for response in responses["EnableLogging"]:
+        if "Message" in response:
+            message = response["Message"]
+
+    return {
+        "status": "Success",
+        "message": message,
+        "details": responses,
+    }
 
 
 def handle_elbv2(res_id, region, svc, acct):
@@ -7384,6 +7461,7 @@ def handle_elbv2(res_id, region, svc, acct):
         )
     except Exception as e:
         return add_error("enable_logging", f"Unexpected error: {str(e)}")
+        raise RuntimeError(str(e))
 
 
 def setupAPIGatewayAccountSettings(acct, client):
@@ -7522,7 +7600,7 @@ def handle_api_gateway_stage(res_split, region, acct):
 
     except Exception as e:
         result.append(
-            add_error("enable_logging", f"Failed to configure API Gateway: {str(e)}")
+            add_error("update_stage", f"Failed to configure API Gateway: {str(e)}")
         )
 
     return result[0] if result else add_error("unknown", "No result generated")
@@ -7805,26 +7883,46 @@ def handle_cloudfront_distribution(res_split, region, acct, logging_bucket):
     return result[0] if result else add_error("unknown", "No result generated")
 
 
-def handle_s3_bucket(bucket_name, region, acct, logging_bucket):
+def handle_s3_bucket(bucket_name, logging_bucket):
+    result = []
     # bucket_name is the resource name
     s3_client = boto3.client("s3")
     target_prefix = f"{bucket_name}/"
 
     try:
+        # Check for circular recursive logging scenarios
+        if bucket_name == logging_bucket:
+            return add_response(
+                "server_access_logging",
+                f"same_bucket_check: {bucket_name} is a logging bucket and cannot log to itself!",
+                True,  # Flag the suppression request
+            )
+
+        # Get tags of the source bucket
+        try:
+            response = s3_client.get_bucket_tagging(Bucket=bucket_name)
+            tags = response.get("TagSet", [])
+            # Look for a tag of exemptLoggingBucket=True
+            for tag in tags:
+                if tag["Key"] == "exemptLoggingBucket" and tag["Value"] == "True":
+                    return add_response(
+                        "server_access_logging",
+                        f"exemptLoggingBucket_check: {bucket_name} is exempt from logging!",
+                        True,  # Flag the suppression request
+                    )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchTagSet":
+                # No tags on the bucket, continue with logging setup
+                pass
+            else:
+                # Re-raise other ClientError exceptions
+                raise
+
         # Check if source bucket exists
         s3_client.head_bucket(Bucket=bucket_name)
 
-        # Check for circular logging scenarios
-        if bucket_name == logging_bucket or "s3-access-logs" in bucket_name:
-            return {
-                "output": {
-                    "message": "This bucket is exempt from logging as it would create a circular log effect",
-                    "resourceBucketName": bucket_name,
-                    "LoggingBucketName": logging_bucket,
-                    "LoggingPrefix": target_prefix,
-                    "status": "SUPPRESSED",
-                }
-            }
+        # Check if destination bucket exists
+        s3_client.head_bucket(Bucket=logging_bucket)
 
         # Enable access logging
         s3_client.put_bucket_logging(
@@ -7840,48 +7938,37 @@ def handle_s3_bucket(bucket_name, region, acct, logging_bucket):
             },
         )
 
-        return {
-            "output": {
-                "message": "Server Access Logging Successfully Set.",
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "RESOLVED",
-            }
-        }
+        result.append(
+            add_response(
+                "server_access_logging",
+                f"Bucket {bucket_name} is logging to {logging_bucket}",
+            )
+        )
     except s3_client.exceptions.NoSuchBucket:
-        return {
-            "output": {
-                "message": "One of the buckets doesnt exist",
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "FAILED",
-            }
-        }
+        return add_error(
+            "server_access_logging",
+            f"bucket_exists_check: {bucket_name} or {logging_bucket} doesnt exist!",
+        )
     except Exception as e:
-        return {
-            "output": {
-                "message": str(e),
-                "resourceBucketName": bucket_name,
-                "LoggingBucketName": logging_bucket,
-                "LoggingPrefix": target_prefix,
-                "status": "FAILED",
-            }
-        }
+        return add_error(
+            "server_access_logging",
+            f"{e.response['Error']['Code']}: {bucket_name} or {logging_bucket} doesnt exist!",
+        )
+
+    return result[0] if result else add_error("unknown", "No result generated")
 
 
 # For local testing
 if __name__ == "__main__":
     # Example event for testing
     test_event = {
-        "ResourceId": "asr-test-bucket-kpp-2",
+        "ResourceId": "cnxc-s3-server-access-logging-211125410042-us-east-1",
         "Region": "us-east-1",
         "AccountId": "211125410042",
         "ResourceType": "AwsS3Bucket",
         "LoggingBucket": "cnxc-s3-server-access-logging-211125410042-us-east-1",
     }
-    print(runbook_handler((test_event), None))",
+    print(json.dumps(runbook_handler((test_event), None), indent=4))",
               },
               "isEnd": true,
               "name": "Remediation",

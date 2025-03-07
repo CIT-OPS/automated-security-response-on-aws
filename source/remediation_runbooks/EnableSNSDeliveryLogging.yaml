@@ -43,7 +43,7 @@ mainSteps:
       InputPayload:
         ResourceId: '{{SNSTopicArn}}'
         Region: '{{Region}}'
-      Runtime: python3.8
+      Runtime: python3.11
       Handler: runbook_handler
       Script: |-
         %%SCRIPT=EnableSNSDeliveryLogging.py%%
