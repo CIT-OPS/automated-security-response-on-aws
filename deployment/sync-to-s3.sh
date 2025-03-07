@@ -16,7 +16,13 @@ echo "Version: $DIST_VERSION"
 echo "Solution Name: $DIST_SOLUTION_NAME"
 echo "Account Identifier: $ACCOUNT_IDENTIFIER"
 
-if [ "$ACCOUNT_IDENTIFIER" == "008012068868" ]; then
+if [ "$ACCOUNT_IDENTIFIER" == "116981786788" ]; then
+    #TRANSURBAN AUS MPA
+    ORGANIZATION_ID="o-1cse3qs4b8"
+    SECHUB_ACCOUNT='340752811256'
+    TEST_ACCOUNT='340752811256'
+    REGIONS=( "us-east-1" "ap-southeast-2" )
+elif [ "$ACCOUNT_IDENTIFIER" == "008012068868" ]; then
     #CXTECH KENS LAB
     ORGANIZATION_ID="o-ey4kshnlxl"
     SECHUB_ACCOUNT='211125410042'
