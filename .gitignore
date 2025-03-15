@@ -43,16 +43,14 @@ requirements.txt
 .idea/
 
 # system
-.DS_Store
-deployment/awscli-update-*
-deployment/s3-file-names.txt
+
 source/test/__snapshots__/*.snap
 
-deployment/awscli-update-*
-deployment/s3-file-names.txt
+
 source/test/__snapshots__/*.snap
 
 #CNXC
+.DS_Store
 deployment/awscli-*
 deployment/pytest_cache/*
 deployment/s3-file-names.*
